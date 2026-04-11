@@ -1,0 +1,10 @@
+{
+  "colour": "#2b2020",
+  "channels": [
+    {"label": "Intensity", "master": true,  "default": 0,   "range": [0, 100], "unit": "%",   "show": true},
+    {"label": "R",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "G",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "B",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "W",         "master": false, "default": 255, "range": [0, 255], "unit": "raw", "show": true}
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "colour": "#2b2b2b",
+  "channels": [
+    {
+      "label": "Red Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Green Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Blue Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "White Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Amber Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "UV Master",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    }
+  ]
+}

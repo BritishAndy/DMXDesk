@@ -1,0 +1,82 @@
+{
+  "colour": "#2b2b2b",
+  "channels": [
+    {
+      "label": "R",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "G",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "B",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "W",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Speed",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "ProgA",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "ProgB",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    }
+  ]
+}

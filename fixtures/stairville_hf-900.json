@@ -1,0 +1,38 @@
+{
+  "colour": "#2b2b2b",
+  "channels": [
+    {
+      "label": "Haze Vol",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "Fan Spd",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "Mode",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": " Hazer",
+        "128-255": "Fogger"
+      },
+      "unit": "named",
+      "show": true
+    }
+  ]
+}

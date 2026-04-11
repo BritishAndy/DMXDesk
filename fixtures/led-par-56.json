@@ -1,0 +1,82 @@
+{
+  "colour": "#2b2020",
+  "channels": [
+    {
+      "label": "R",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "G",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "B",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Macro",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Speed / Strobe",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Mode",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Dimmer",
+      "master": true,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    }
+  ]
+}

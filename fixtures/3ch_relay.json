@@ -1,0 +1,39 @@
+{
+  "layout": "vertical",
+  "colour": "#1a2b8a",
+  "channels": [
+    {
+      "label": "Beacon",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": "Off",
+        "128-255": "On"
+      },
+      "unit": "named",
+      "show": true
+    },
+    {
+      "label": "Siren",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": "Off",
+        "128-255": "On"
+      },
+      "unit": "named",
+      "show": true
+    },
+    {
+      "label": "Strobe",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": "Off",
+        "128-255": "On"
+      },
+      "unit": "named",
+      "show": true
+    }
+  ]
+}

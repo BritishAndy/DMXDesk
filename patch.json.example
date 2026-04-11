@@ -1,0 +1,10 @@
+[
+  {"type": "houselights", "name": "House Lights", "address": 1,  "row": 1, "colour": "#2b3b2b"},
+  {"type": "dimmer",      "name": "Spot SR",       "address": 2,  "row": 1, "colour": "#2b2b2b"},
+  {"type": "dimmer",      "name": "Spot SL",       "address": 3,  "row": 1, "colour": "#2b2b2b"},
+  {"type": "rgb",         "name": "Wash 1",         "address": 4,  "row": 1, "colour": "#2b2b4a"},
+  {"type": "rgb",         "name": "Wash 2",         "address": 7,  "row": 1, "colour": "#2b2b4a"},
+  {"type": "divider",                                               "row": 1},
+  {"type": "submaster",   "name": "Wash Sub",       "row": 1, "targets": ["Wash 1", "Wash 2"]},
+  {"type": "clock",       "name": "Show Clock",     "row": 1}
+]

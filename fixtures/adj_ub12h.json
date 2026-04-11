@@ -1,0 +1,155 @@
+{
+  "colour": "#1a2b8a",
+  "channels": [
+    {
+      "label": "R",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "G",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "B",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "W",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "A",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "UV",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "ColMcro",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-40": "Manual",
+        "41-60": "Col chg",
+        "61-80": "Col fade",
+        "81-100": "Col in-out",
+        "101-120": "STL",
+        "121-140": "STL w. BO",
+        "141-160": "Col w. Zm",
+        "161-180": "Col w. Fd Zm",
+        "181-200": "Col i/o w. Zm",
+        "201-220": "STL w.Zm",
+        "221-255": "STL w. Bo Zm"
+      },
+      "unit": "named",
+      "show": true
+    },
+    {
+      "label": "Program",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-40": "Manual",
+        "41-60": "Col chg",
+        "61-80": "Col fade",
+        "81-100": "Col in-out",
+        "101-120": "STL",
+        "121-140": "STL w. BO",
+        "141-160": "Col w. Zm",
+        "161-180": "Col w. Fd Zm",
+        "181-200": "Col i/o w. Zm",
+        "201-220": "STL w.Zm",
+        "221-255": "STL w. Bo Zm"
+      },
+      "unit": "named",
+      "show": true
+    },
+    {
+      "label": "ProgSpeed",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": false
+    },
+    {
+      "label": "Strobe",
+      "master": false,
+      "default": 255,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Intensity",
+      "master": true,
+      "default": 0,
+      "range": [
+        0,
+        100
+      ],
+      "unit": "%",
+      "show": true
+    },
+    {
+      "label": "Crv",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": false
+    }
+  ]
+}

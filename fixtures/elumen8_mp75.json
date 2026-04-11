@@ -1,0 +1,12 @@
+{
+  "colour": "#8a2b3a",
+  "channels": [
+    {"label": "Mode",      "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "R",         "master": false, "default": 0,   "range": [0, 100], "unit": "%", "show": true},
+    {"label": "G",         "master": false, "default": 0,   "range": [0, 100], "unit": "%", "show": true},
+    {"label": "B",         "master": false, "default": 0,   "range": [0, 100], "unit": "%", "show": true},
+    {"label": "W",         "master": false, "default": 0,   "range": [0, 100], "unit": "%", "show": true},
+    {"label": "Dimming Curve", "master": false, "default": 220,   "range": [0, 100], "unit": "raw", "show": false},
+    {"label": "Master",     "master": true, "default": 0,   "range": [0, 100], "unit": "%", "show": true}
+  ]
+}

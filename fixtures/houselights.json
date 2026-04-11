@@ -1,0 +1,6 @@
+{
+  "colour": "#2b552b",
+  "channels": [
+    {"label": "Houselights", "master": true, "default": 100, "range": [0, 100], "unit": "%", "show": true}
+  ]
+}

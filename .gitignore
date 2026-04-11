@@ -1,0 +1,28 @@
+# User-specific files — do not commit
+patch.json
+patch_scenes.json
+desk_prefs.json
+ofl_fixtures.json
+
+# Show files
+shows/
+
+# Build output
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
+*.icns
+
+# Generated PDFs
+DMX_Desk_Manual.pdf
+DMX_Desk_Quick_Reference.pdf
+
+# Virtual environments
+venv/
+.venv/

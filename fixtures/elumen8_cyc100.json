@@ -1,0 +1,9 @@
+{
+  "colour": "#1a8b3a",
+  "channels": [
+    {"label": "R",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "G",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "B",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "W",         "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true}
+  ]
+}
