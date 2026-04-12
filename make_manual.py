@@ -24,9 +24,9 @@ def make_styles():
     base = ParagraphStyle('base', fontName='Helvetica', fontSize=10,
                            textColor=colors.black, leading=14)
     return dict(
-        title     = ParagraphStyle('T',  parent=base, fontSize=28,
+        title     = ParagraphStyle('T',  parent=base, fontSize=22,
                                     fontName='Helvetica-Bold', textColor=GOLD,
-                                    alignment=TA_CENTER, spaceAfter=6),
+                                    leading=28, alignment=TA_CENTER, spaceAfter=8),
         subtitle  = ParagraphStyle('St', parent=base, fontSize=14,
                                     textColor=DIM_GREY, alignment=TA_CENTER, spaceAfter=4),
         section   = ParagraphStyle('S',  parent=base, fontSize=14,
@@ -439,84 +439,138 @@ def build_quick_ref(path):
         sp(1),
     ]
 
-    def col_section(title, rows):
-        items = [p('<b>' + title + '</b>', 'subsection')]
-        for k, v in rows:
-            items.append(key_table([(k, v)], col_widths=[42*mm, 70*mm]))
-        return items
+    # Build a single flat table for the quick reference
+    # Each section is a heading row + data rows, two sections side by side
+    HEAD_BG  = colors.HexColor("#222222")
+    HEAD_FG  = GOLD
+    KEY_BG   = colors.HexColor("#f0f0f0")
+    ALT_BG   = colors.HexColor("#f8f8f8")
 
-    left = []
-    left += col_section("Scenes", [
-        ("Left click",          "Recall scene"),
-        ("Right double-click",  "Edit name / colour"),
-        ("Ctrl+drag",           "Reorder"),
-        ("REC",                 "Record (warns if solos active)"),
-        ("CLR",                 "Clear scene"),
-        ("Fade (s)",            "Set fade time"),
-        ("STOP FADE",           "Interrupt running fade"),
-    ])
-    left += col_section("Solos & Record", [
-        ("S button",            "Solo a channel"),
-        ("Solo fix",            "Solo whole fixture + light S buttons"),
-        ("REC with solos",      "Partial scene record"),
-        ("CLEAR SOLOS",         "Clear all solos"),
-    ])
-    left += col_section("Copy & Paste", [
-        ("Ctrl+click",          "Copy fixture state"),
-        ("Click green",         "Paste to fixture"),
-        ("Escape",              "Cancel paste"),
-    ])
-    left += col_section("Group Control", [
-        ("Shift+click 1st",     "Set reference fixture"),
-        ("Shift+click 2nd+",    "Fade to match, join group"),
-        ("Move any master",     "All track together"),
-        ("Click / Escape",      "Clear group"),
-    ])
+    fnt_h = ("Helvetica-Bold", 8)
+    fnt_k = ("Courier",        7)
+    fnt_v = ("Helvetica",      7)
 
-    right = []
-    right += col_section("Patch Editor", [
-        ("Double-click row",    "Edit entry"),
-        ("Shift+click",         "Multi-select"),
-        ("+ Add Fixture",       "New fixture"),
-        ("Create Fixture",      "New fixture from template"),
-        ("Edit Fixture Def",    "Edit fixture JSON"),
-        ("Find Fixture",        "Import from OFL"),
-        ("Save & Reload",       "Apply all changes"),
-    ])
-    right += col_section("Settings", [
-        ("Art-Net IP/Port",     "Target node address"),
-        ("Universe",            "Art-Net universe 0-15"),
-        ("Scene layout",        "paired / sequential"),
-        ("Reload last show",    "Auto-load on startup"),
-        ("OSC Port",            "Default 8000"),
-    ])
-    right += col_section("QLab OSC", [
-        ("/desk/scene/recall N",    "Recall slot N"),
-        ('/desk/scene/recall "Name"',"Recall by name"),
-        ("/desk/scene/recall/Name", "Recall (underscores=spaces)"),
-        ("/desk/scene/go",          "Fire selected scene"),
-        ("/desk/grandmaster 80",    "Set GM to 80%"),
-        ("/desk/fader/Name 75",     "Set fixture to 75%"),
-    ])
-    right += col_section("Clock Widget", [
-        ("START/STOP",          "Stopwatch / countdown"),
-        ("LAP",                 "Record lap time"),
-        ("RST",                 "Reset"),
-        ("Flashing red",        "Countdown at zero"),
-    ])
+    def qr_section(title, rows):
+        """Returns list of (key_text, val_text) with a title sentinel."""
+        return [("__HEAD__", title)] + list(rows)
 
-    while len(left) < len(right): left.append(sp(1))
-    while len(right) < len(left): right.append(sp(1))
+    left_data = (
+        qr_section("SCENES", [
+            ("Left click",         "Recall scene"),
+            ("Right dbl-click",    "Edit name / colour"),
+            ("Ctrl+drag",          "Reorder"),
+            ("REC",                "Record (warns if solos active)"),
+            ("CLR",                "Clear scene"),
+            ("Fade (s)",           "Set fade time"),
+            ("STOP FADE",          "Interrupt running fade"),
+        ]) +
+        qr_section("SOLOS & RECORD", [
+            ("S button",           "Solo a channel"),
+            ("Solo fix",           "Solo whole fixture + light S"),
+            ("REC with solos",     "Partial scene record"),
+            ("CLEAR SOLOS",        "Clear all solos"),
+        ]) +
+        qr_section("COPY & PASTE", [
+            ("Ctrl+click",         "Copy fixture state"),
+            ("Click green",        "Paste to fixture"),
+            ("Escape",             "Cancel paste"),
+        ]) +
+        qr_section("GROUP CONTROL", [
+            ("Shift+click 1st",    "Set reference fixture"),
+            ("Shift+click 2nd+",   "Fade to match, join group"),
+            ("Move any master",    "All track together"),
+            ("Click / Escape",     "Clear group"),
+        ])
+    )
 
-    two_col = Table([[left, right]], colWidths=[91*mm, 91*mm])
-    two_col.setStyle(TableStyle([
-        ('VALIGN',        (0,0), (-1,-1), 'TOP'),
-        ('LEFTPADDING',   (0,0), (-1,-1), 0),
-        ('RIGHTPADDING',  (0,0), (-1,-1), 4),
-        ('TOPPADDING',    (0,0), (-1,-1), 0),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 0),
-    ]))
-    story.append(two_col)
+    right_data = (
+        qr_section("PATCH EDITOR", [
+            ("Double-click row",   "Edit entry"),
+            ("Shift+click",        "Multi-select"),
+            ("+ Add Fixture",      "New fixture"),
+            ("Create Fixture",     "New from template"),
+            ("Edit Fixture Def",   "Edit fixture JSON"),
+            ("Find Fixture",       "Import from OFL"),
+            ("Save & Reload",      "Apply all changes"),
+        ]) +
+        qr_section("SETTINGS", [
+            ("Art-Net IP/Port",    "Target node address"),
+            ("Universe",           "0-15"),
+            ("Scene layout",       "paired / sequential"),
+            ("Reload last show",   "Auto-load on startup"),
+            ("OSC Port",           "Default 8000"),
+        ]) +
+        qr_section("QLAB OSC COMMANDS", [
+            ("/desk/scene/recall N",  "Recall slot N"),
+            ("/desk/scene/recall/Name","Recall by name"),
+            ("/desk/scene/go",         "Fire selected scene"),
+            ("/desk/grandmaster 80",   "Set GM to 80%"),
+            ("/desk/fader/Name 75",    "Set fixture to 75%"),
+        ]) +
+        qr_section("CLOCK WIDGET", [
+            ("START/STOP",         "Stopwatch / countdown"),
+            ("LAP",                "Record lap time"),
+            ("RST",                "Reset"),
+            ("Flashing red",       "Countdown at zero"),
+        ])
+    )
+
+    # Pad to equal length
+    while len(left_data) < len(right_data):
+        left_data = list(left_data) + [("", "")]
+    while len(right_data) < len(left_data):
+        right_data = list(right_data) + [("", "")]
+
+    CW = [22*mm, 60*mm, 22*mm, 60*mm]  # key / val / key / val
+
+    table_data = []
+    style_cmds = [
+        ('FONTSIZE',     (0,0), (-1,-1), 7),
+        ('TOPPADDING',   (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING',(0,0), (-1,-1), 2),
+        ('LEFTPADDING',  (0,0), (-1,-1), 3),
+        ('RIGHTPADDING', (0,0), (-1,-1), 3),
+        ('VALIGN',       (0,0), (-1,-1), 'TOP'),
+        ('GRID',         (0,0), (-1,-1), 0.25, colors.HexColor("#dddddd")),
+    ]
+
+    for i, ((lk, lv), (rk, rv)) in enumerate(zip(left_data, right_data)):
+        if lk == "__HEAD__":
+            row = [Paragraph('<b>' + lv + '</b>', ParagraphStyle('qh',
+                    fontName='Helvetica-Bold', fontSize=7, textColor=GOLD,
+                    leading=9)),
+                   Paragraph('', ST['body']),
+                   Paragraph('<b>' + rv + '</b>' if rv else '', ParagraphStyle('qh2',
+                    fontName='Helvetica-Bold', fontSize=7, textColor=GOLD,
+                    leading=9)),
+                   Paragraph('', ST['body'])]
+            style_cmds += [
+                ('BACKGROUND',  (0,i), (1,i), colors.HexColor("#222222")),
+                ('BACKGROUND',  (2,i), (3,i), colors.HexColor("#222222")),
+                ('SPAN',        (0,i), (1,i)),
+                ('SPAN',        (2,i), (3,i)),
+            ]
+        else:
+            row = [
+                Paragraph(lk, ParagraphStyle('qk', fontName='Courier',
+                           fontSize=7, leading=9)),
+                Paragraph(lv, ParagraphStyle('qv', fontName='Helvetica',
+                           fontSize=7, leading=9)),
+                Paragraph(rk, ParagraphStyle('qk2', fontName='Courier',
+                           fontSize=7, leading=9)),
+                Paragraph(rv, ParagraphStyle('qv2', fontName='Helvetica',
+                           fontSize=7, leading=9)),
+            ]
+            bg = KEY_BG if i % 2 == 0 else ALT_BG
+            style_cmds += [
+                ('BACKGROUND', (0,i), (0,i), bg),
+                ('BACKGROUND', (2,i), (2,i), bg),
+            ]
+        table_data.append(row)
+
+    qr_table = Table(table_data, colWidths=CW)
+    qr_table.setStyle(TableStyle(style_cmds))
+    story.append(qr_table)
 
     story += [
         sp(2),
