@@ -585,5 +585,7 @@ def build_quick_ref(path):
 
 
 if __name__ == "__main__":
-    build_full_manual("/home/claude/DMX_Desk_Manual.pdf")
-    build_quick_ref("/home/claude/DMX_Desk_Quick_Reference.pdf")
+    import os
+    base = os.path.dirname(os.path.abspath(__file__))
+    build_full_manual(os.path.join(base, "DMX_Desk_Manual.pdf"))
+    build_quick_ref(os.path.join(base, "DMX_Desk_Quick_Reference.pdf"))
