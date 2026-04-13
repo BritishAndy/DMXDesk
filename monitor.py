@@ -7,10 +7,11 @@ Listens for Art-Net packets from multiple sources, merges using HTP
 No extra dependencies — uses only Python built-in socket library.
 
 Usage:
-    python3 monitor.py                        # listen on all interfaces, universe 0
+    python3 monitor.py                        # list view, universe 0
+    python3 monitor.py --grid                 # compact 32x16 grid of all 512 channels
     python3 monitor.py --universe 1           # watch a different universe
     python3 monitor.py --port 6454            # specify port (default 6454)
-    python3 monitor.py --threshold 5          # only show channels above this value
+    python3 monitor.py --threshold 5          # only show channels at or above this value
     python3 monitor.py --patch patch.json     # show fixture names alongside channels
     python3 monitor.py --no-merge             # last packet wins (no HTP merge)
 """
@@ -24,6 +25,42 @@ from pathlib import Path
 
 ARTNET_HEADER     = b"Art-Net\x00"
 ARTNET_OPCODE_DMX = 0x5000
+
+# ── ANSI colour codes ──────────────────────────────────────────────────────────
+RESET  = "\033[0m"
+BOLD   = "\033[1m"
+DIM    = "\033[2m"
+
+def ansi_fg(r, g, b):    return f"\033[38;2;{r};{g};{b}m"
+def ansi_bg(r, g, b):    return f"\033[48;2;{r};{g};{b}m"
+
+GOLD   = ansi_fg(255, 204, 0)
+BLUE   = ansi_fg(100, 160, 255)
+GREY   = ansi_fg(100, 100, 100)
+GREEN  = ansi_fg(80,  220, 80)
+AMBER  = ansi_fg(220, 160, 0)
+RED    = ansi_fg(220, 80,  80)
+
+# Direction tracking — previous frame values
+_prev_dmx = [0] * 512
+
+def dir_colour(ch_idx, v):
+    """ANSI colour based on direction of change: green=rising, red=falling,
+    white=steady non-zero, grey=zero."""
+    if v == 0:
+        return GREY
+    prev = _prev_dmx[ch_idx]
+    if v > prev:   return GREEN
+    if v < prev:   return RED
+    return BLUE   # steady non-zero
+
+def update_prev(dmx_merged):
+    """Call once per render to update previous frame."""
+    for i in range(512):
+        _prev_dmx[i] = dmx_merged[i]
+
+
+# ── Fixture def loading ────────────────────────────────────────────────────────
 
 _BUILTIN_DEFS = {
     "dimmer": {"channels": [{"label": "Dimmer", "master": True}]},
@@ -67,6 +104,9 @@ def load_patch(patch_path):
             lookup[address] = name
     return lookup
 
+
+# ── Art-Net parsing ────────────────────────────────────────────────────────────
+
 def parse_artnet(data, target_universe):
     if len(data) < 18:
         return None
@@ -79,25 +119,32 @@ def parse_artnet(data, target_universe):
     length = (data[16] << 8) | data[17]
     return data[18:18 + length]
 
-def bar(value, width=20):
-    filled = int(value / 255 * width)
-    return "█" * filled + "░" * (width - filled)
+
+# ── Display ────────────────────────────────────────────────────────────────────
 
 def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
+    # \033[H = cursor home, \033[J = clear from cursor to end
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        print("\033[H\033[J", end="", flush=True)
 
-def render(dmx_merged, source_dmx, channel_names, threshold,
-           universe, port, packet_count, last_seen, htp_merge):
+def header_line(universe, port, merge_mode, packet_count, last_seen, source_dmx):
+    age  = f"{time.time() - last_seen:.1f}s ago" if last_seen else "waiting..."
+    srcs = f"  Sources: {len(source_dmx)}" if len(source_dmx) > 1 else ""
+    return (f"{GOLD}{BOLD}  Art-Net DMX Monitor{RESET}  "
+            f"Universe {universe}  Port {port}  "
+            f"Mode: {merge_mode}  Pkts: {packet_count}  Last: {age}{srcs}")
+
+def render_list(dmx_merged, source_dmx, channel_names, threshold,
+                universe, port, packet_count, last_seen, htp_merge):
     clear_screen()
-    age        = f"{time.time() - last_seen:.1f}s ago" if last_seen else "waiting..."
     merge_mode = "HTP merge" if htp_merge else "last-wins"
-
-    print(f"  Art-Net DMX Monitor  |  Universe {universe}  Port {port}  "
-          f"Mode: {merge_mode}  Pkts: {packet_count}  Last: {age}")
+    print(header_line(universe, port, merge_mode, packet_count, last_seen, source_dmx))
     print(f"  {'─' * 70}")
 
     if htp_merge and len(source_dmx) > 1:
-        print(f"  Sources:")
+        print(f"  {GOLD}Sources:{RESET}")
         for ip in sorted(source_dmx):
             dmx, ts = source_dmx[ip]
             active  = sum(1 for v in dmx if v > 0)
@@ -106,24 +153,74 @@ def render(dmx_merged, source_dmx, channel_names, threshold,
         print()
 
     active = [(i + 1, v) for i, v in enumerate(dmx_merged) if v >= threshold]
-
     if not active:
-        print("  (no active channels)")
+        print(f"  {GREY}(no active channels){RESET}")
     else:
         for ch, val in active:
             name     = channel_names.get(ch, "")
             name_col = f"{name:<26}" if name else " " * 26
             pct      = int(val / 255 * 100)
+            bar_w    = 20
+            filled   = int(val / 255 * bar_w)
+            bar      = dir_colour(ch-1, val) + "█" * filled + GREY + "░" * (bar_w - filled) + RESET
             winner   = ""
             if htp_merge and len(source_dmx) > 1:
                 winners = [ip for ip, (dmx, _) in source_dmx.items()
                            if ch - 1 < len(dmx) and dmx[ch - 1] == val and val > 0]
-                if len(winners) == 1:   winner = f"  ← {winners[0]}"
-                elif len(winners) > 1:  winner = "  ← tied"
-            print(f"  ch {ch:>3}  {name_col}  {bar(val)}  {val:>3} ({pct:>3}%){winner}")
+                if len(winners) == 1:  winner = f"  {GREY}← {winners[0]}{RESET}"
+                elif len(winners) > 1: winner = f"  {GREY}← tied{RESET}"
+            print(f"  ch {ch:>3}  {name_col}  {bar}  "
+                  f"{dir_colour(ch-1, val)}{val:>3}{RESET} ({pct:>3}%){winner}")
 
-    print()
-    print("  Ctrl+C to quit.")
+    print(f"\n  {GREY}Ctrl+C to quit  |  all 512 channels: --grid{RESET}")
+    update_prev(dmx_merged)
+
+def render_grid(dmx_merged, source_dmx, channel_names, threshold,
+                universe, port, packet_count, last_seen, htp_merge):
+    """Compact 32-column grid showing all 512 DMX channels."""
+    clear_screen()
+    merge_mode = "HTP merge" if htp_merge else "last-wins"
+    print(header_line(universe, port, merge_mode, packet_count, last_seen, source_dmx))
+
+    COLS = 32
+    # Column headers
+    hdr = "     "
+    for c in range(COLS):
+        hdr += f"{c+1:>4} "
+    print(f"\n{GREY}{hdr}{RESET}")
+    print(f"  {'─' * (COLS * 5 + 4)}")
+
+    for row in range(16):   # 16 rows × 32 cols = 512 channels
+        base    = row * COLS
+        row_lbl = f"{GREY}{base+1:>3}│{RESET} "
+        cells   = ""
+        has_active = False
+        for col in range(COLS):
+            ch  = base + col       # 0-indexed
+            val = dmx_merged[ch]
+            if val > 0:
+                has_active = True
+            cells += dir_colour(ch, val) + f"{val:>4} " + RESET
+        print(f"  {row_lbl}{cells}")
+
+    # Key
+    print(f"\n  {GREY}{'─'*40}{RESET}")
+    print(f"  {GREY}0 = zero{RESET}   {GREEN}green = rising{RESET}   {RED}red = falling{RESET}   {BLUE}blue = steady{RESET}")
+
+    # Active channel summary with names
+    named = [(i+1, dmx_merged[i]) for i in range(512)
+             if dmx_merged[i] >= threshold and (i+1) in channel_names]
+    if named:
+        print(f"\n  {GOLD}Named active channels:{RESET}")
+        for ch, val in named:
+            print(f"    ch {ch:>3}  {channel_names[ch]:<28}  "
+                  f"{dir_colour(ch-1, val)}{val:>3}{RESET}  ({int(val/255*100):>3}%)")
+
+    print(f"\n  {GREY}Ctrl+C to quit  |  list view: remove --grid{RESET}")
+    update_prev(dmx_merged)
+
+
+# ── Main ───────────────────────────────────────────────────────────────────────
 
 def parse_args():
     p = argparse.ArgumentParser(description="Art-Net DMX Monitor with HTP Merge")
@@ -133,6 +230,8 @@ def parse_args():
     p.add_argument("--patch",     default="patch.json")
     p.add_argument("--no-merge",  action="store_true",
                    help="Disable HTP merge — last packet wins")
+    p.add_argument("--grid",      action="store_true",
+                   help="Show compact 32x16 grid of all 512 channels")
     return p.parse_args()
 
 def main():
@@ -146,7 +245,7 @@ def main():
     sock.bind(("0.0.0.0", args.port))
     sock.settimeout(0.5)
 
-    source_dmx   = {}   # {ip: ([0]*512, timestamp)}
+    source_dmx   = {}
     dmx_merged   = [0] * 512
     packet_count = 0
     last_seen    = None
@@ -159,8 +258,11 @@ def main():
             for ch in range(512):
                 dmx_merged[ch] = 0
 
+    render_fn = render_grid if args.grid else render_list
+
     print(f"Listening on port {args.port}, universe {args.universe}, "
-          f"mode={'HTP merge' if htp_merge else 'last-wins'}")
+          f"mode={'HTP merge' if htp_merge else 'last-wins'}, "
+          f"view={'grid' if args.grid else 'list'}")
     print(f"Patch: {len(channel_names)} channels named.")
     print()
 
@@ -181,7 +283,6 @@ def main():
             except socket.timeout:
                 pass
 
-            # Expire stale sources
             now   = time.time()
             stale = [ip for ip, (_, ts) in source_dmx.items()
                      if now - ts > SOURCE_TIMEOUT]
@@ -191,9 +292,9 @@ def main():
                 if htp_merge:
                     _remerge()
 
-            render(dmx_merged, source_dmx, channel_names,
-                   args.threshold, args.universe, args.port,
-                   packet_count, last_seen, htp_merge)
+            render_fn(dmx_merged, source_dmx, channel_names,
+                      args.threshold, args.universe, args.port,
+                      packet_count, last_seen, htp_merge)
 
     except KeyboardInterrupt:
         print("\nMonitor stopped.")

@@ -120,7 +120,8 @@ def build_full_manual(path):
             ("16. Settings",              "Art-Net, appearance, behaviour, OSC"),
             ("17. Save & Load",           "Saving shows and patches"),
             ("18. QLab Integration",      "OSC control from QLab"),
-            ("19. Keyboard & Mouse",      "Quick reference"),
+            ("19. Monitoring Tools",       "monitor_gui.py and monitor.py"),
+            ("20. Keyboard & Mouse",      "Quick reference"),
         ], col_widths=[60*mm, 105*mm]),
         PageBreak(),
     ]
@@ -406,7 +407,37 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("19. Keyboard & Mouse"),
+        section_title("19. Monitoring Tools"),
+        sub("monitor_gui.py — GUI Monitor (recommended)"),
+        p("A tkinter companion application for testing and diagnosing DMX output. "
+          "Run alongside desk.py on the same machine or any Mac on the same network."),
+        sp(2),
+        p("  python3 monitor_gui.py", 'kbd'),
+        p("  python3 monitor_gui.py --patch patch.json   — show fixture names", 'kbd'),
+        p("  python3 monitor_gui.py --port 6454 --universe 0", 'kbd'),
+        sp(2),
+        key_table([
+            ("Channel Grid tab",   "32x16 grid of all 512 DMX channels. "
+                                   "Colour coded: green=rising, red=falling, "
+                                   "blue=steady, dark=zero."),
+            ("Fixture View tab",   "One row per fixture showing all channel values "
+                                   "with fixture colour coding from patch.json."),
+            ("Hover (grid)",       "Shows channel number, fixture name and value "
+                                   "in the tooltip bar below the grid."),
+            ("HTP merge",          "Receives from multiple Art-Net sources and "
+                                   "displays the highest value per channel."),
+        ]),
+        sp(3),
+        sub("monitor.py — Terminal Monitor"),
+        p("A lightweight terminal-based monitor, useful for headless or SSH use."),
+        sp(2),
+        p("  python3 monitor.py", 'kbd'),
+        p("  python3 monitor.py --no-merge   — last packet wins", 'kbd'),
+        p("  python3 monitor.py --threshold 5", 'kbd'),
+    ]
+
+    story += [
+        section_title("20. Keyboard & Mouse"),
         key_table([
             ("Ctrl+click fixture",       "Copy fixture state"),
             ("Click green fixture",      "Paste copied state"),

@@ -144,12 +144,28 @@ Then add Network cues to your cue list:
 
 Combine with Art-Net HTP merge at your node so both QLab and the desk can send simultaneously — the highest value per channel wins.
 
-## Art-Net Monitor
+## Monitoring Tools
 
-`monitor.py` is a terminal-based Art-Net monitor with HTP merge, useful for testing without a node connected:
+### monitor_gui.py — GUI Monitor (recommended)
+
+A tkinter companion application showing a channel grid and fixture view with live direction colour coding (green=rising, red=falling, blue=steady, dark=zero).
 
 ```bash
-python3 monitor.py                  # listen on default port/universe
+python3 monitor_gui.py
+python3 monitor_gui.py --patch patch.json   # show fixture names
+python3 monitor_gui.py --no-merge           # last-packet-wins mode
+```
+
+Two tabs:
+- **Channel Grid** — 32×16 grid of all 512 channels. Hover for channel name and value.
+- **Fixture View** — one row per fixture with colour coding from patch.json.
+
+### monitor.py — Terminal Monitor
+
+A lightweight terminal-based monitor, useful for headless or SSH sessions:
+
+```bash
+python3 monitor.py                  # list view
 python3 monitor.py --no-merge       # last-packet-wins mode
 python3 monitor.py --threshold 5    # only show channels above 5
 ```
