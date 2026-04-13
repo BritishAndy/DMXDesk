@@ -14,13 +14,25 @@ Usage:
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog, messagebox
 import socket
 import json
 import threading
 import argparse
+import sys
+import os
 import time
 from pathlib import Path
+
+def _app_dir() -> Path:
+    """Return the directory containing this script or app bundle Resources."""
+    if getattr(sys, 'frozen', False):
+        # py2app: executable is in .app/Contents/MacOS/
+        # Resources is in  .app/Contents/Resources/
+        return Path(sys.executable).parent.parent / "Resources"
+    return Path(__file__).parent
+
+APP_DIR = _app_dir()
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 BG          = "#1a1a1a"
@@ -40,6 +52,9 @@ COL_RISING_TEXT  = "#44ff44"
 COL_FALLING_TEXT = "#ff4444"
 COL_STEADY_TEXT  = "#6699ff"
 COL_ZERO_TEXT    = "#444444"
+
+VERSION = "1.0"
+BUILD   = 2
 
 ARTNET_HEADER     = b"Art-Net\x00"
 ARTNET_OPCODE_DMX = 0x5000
@@ -64,7 +79,10 @@ def load_patch(patch_path):
     p = Path(patch_path)
     if not p.exists():
         return {}, []
+    # Look for fixtures/ alongside the patch file, then alongside the app
     fixtures_dir = p.parent / "fixtures"
+    if not fixtures_dir.exists():
+        fixtures_dir = APP_DIR / "fixtures"
     with open(p) as f:
         patch = json.load(f)
 
@@ -93,7 +111,8 @@ def load_patch(patch_path):
                                      "master": ch.get("master", False)})
             fixtures.append({"name": name, "address": address,
                               "colour": colour, "channels": channels})
-        except Exception:
+        except Exception as e:
+            print(f"Warning: could not load fixture def for '{name}' ({ftype}): {e}")
             channel_names[address] = name
             fixtures.append({"name": name, "address": address,
                               "colour": colour,
@@ -129,7 +148,7 @@ class MonitorApp:
         self.dmx_prev   = [0] * 512
         self.dmx_steady    = [0] * 512   # frames unchanged
         self.dmx_direction = [0] * 512   # 1=rising, -1=falling, 0=zero
-        self.STEADY_THRESHOLD = 15         # frames before showing blue (~0.5s)
+        self.STEADY_THRESHOLD = 5         # frames before showing blue (~0.5s)
         self.source_dmx = {}   # {ip: ([0]*512, timestamp)}
         self.pkt_count  = 0
         self.last_seen  = None
@@ -153,7 +172,7 @@ class MonitorApp:
         hdr = tk.Frame(self.root, bg=BG2, pady=4)
         hdr.pack(fill=tk.X, padx=0, pady=0)
 
-        tk.Label(hdr, text="Art-Net DMX Monitor", bg=BG2, fg=GOLD,
+        tk.Label(hdr, text=f"Art-Net DMX Monitor  v{VERSION}.{BUILD}", bg=BG2, fg=GOLD,
                  font=("Helvetica", 13, "bold")).pack(side=tk.LEFT, padx=12)
 
         self._status_var = tk.StringVar(value="Waiting for packets…")
@@ -171,6 +190,16 @@ class MonitorApp:
         ]:
             tk.Label(key_frame, text=text, bg=bg, fg=fg,
                      font=("Helvetica", 9)).pack(side=tk.LEFT, padx=6)
+
+        # Patch file label and change button
+        patch_name = Path(self.args.patch).name if self.args.patch else "No patch"
+        self._patch_var = tk.StringVar(value=f"Patch: {patch_name}")
+        tk.Label(hdr, textvariable=self._patch_var, bg=BG2, fg="#557755",
+                 font=("Helvetica", 9, "bold")).pack(side=tk.RIGHT, padx=(0,4))
+        tk.Button(hdr, text="⚙ Patch", bg=BG3, fg="#aaaaff",
+                  font=("Helvetica", 9), relief=tk.FLAT, bd=0,
+                  activebackground=BG3, activeforeground=GOLD,
+                  command=self._change_patch).pack(side=tk.RIGHT, padx=(8,0))
 
         # Sources strip
         self._sources_var = tk.StringVar(value="")
@@ -194,9 +223,27 @@ class MonitorApp:
         fixture_tab = tk.Frame(nb, bg=BG)
         nb.add(grid_tab,    text="  Channel Grid  ")
         nb.add(fixture_tab, text="  Fixture View  ")
+        self._fixture_tab = fixture_tab
 
         self._build_grid_tab(grid_tab)
         self._build_fixture_tab(fixture_tab)
+
+    def _change_patch(self):
+        path = filedialog.askopenfilename(
+            title="Select patch.json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialdir=str(Path(self.args.patch).parent) if self.args.patch else str(Path.home()))
+        if not path:
+            return
+        save_monitor_prefs({"last_patch": path})
+        self.args.patch = path
+        self.channel_names, self.fixtures = load_patch(path)
+        self._patch_var.set(f"Patch: {Path(path).name}")
+        # Rebuild fixture tab
+        for widget in self._fixture_tab.winfo_children():
+            widget.destroy()
+        self._fix_cells = {}
+        self._build_fixture_tab(self._fixture_tab)
 
     def _build_grid_tab(self, parent):
         """32 columns × 16 rows = 512 channels."""
@@ -461,16 +508,71 @@ class MonitorApp:
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
+PREFS_FILE = APP_DIR / "monitor_prefs.json"
+
+def load_monitor_prefs() -> dict:
+    try:
+        if PREFS_FILE.exists():
+            return json.loads(PREFS_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+def save_monitor_prefs(data: dict):
+    try:
+        existing = load_monitor_prefs()
+        existing.update(data)
+        PREFS_FILE.write_text(json.dumps(existing, indent=2))
+    except Exception:
+        pass
+
 def parse_args():
     p = argparse.ArgumentParser(description="Art-Net DMX Monitor GUI")
     p.add_argument("--universe",  type=int, default=0)
     p.add_argument("--port",      type=int, default=6454)
-    p.add_argument("--patch",     default="patch.json")
+    p.add_argument("--patch",     default=None)
     p.add_argument("--no-merge",  action="store_true")
     return p.parse_args()
 
+def resolve_patch(args_patch) -> str:
+    """Find patch file: arg > last used > APP_DIR/patch.json > file picker."""
+    prefs = load_monitor_prefs()
+
+    # Explicit command line argument
+    if args_patch and Path(args_patch).exists():
+        save_monitor_prefs({"last_patch": str(Path(args_patch).resolve())})
+        return args_patch
+
+    # Last used patch file
+    last = prefs.get("last_patch")
+    if last and Path(last).exists():
+        return last
+
+    # Default location alongside app
+    default = APP_DIR / "patch.json"
+    if default.exists():
+        save_monitor_prefs({"last_patch": str(default)})
+        return str(default)
+
+    # Ask user to locate the patch file
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("DMX Monitor",
+        "No patch.json found.\n\nPlease locate your patch.json file.",
+        parent=root)
+    path = filedialog.askopenfilename(
+        title="Select patch.json",
+        filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        initialdir=str(Path.home()))
+    root.destroy()
+    if path:
+        save_monitor_prefs({"last_patch": path})
+        return path
+    return "patch.json"  # fallback, will show no fixtures
+
 def main():
     args = parse_args()
+    args.patch = resolve_patch(args.patch)
     root = tk.Tk()
     app  = MonitorApp(root, args)
     try:
