@@ -148,7 +148,7 @@ class MonitorApp:
         self.dmx_prev   = [0] * 512
         self.dmx_steady    = [0] * 512   # frames unchanged
         self.dmx_direction = [0] * 512   # 1=rising, -1=falling, 0=zero
-        self.STEADY_THRESHOLD = 5         # frames before showing blue (~0.5s)
+        self.STEADY_THRESHOLD = 15         # frames before showing blue (~0.5s)
         self.source_dmx = {}   # {ip: ([0]*512, timestamp)}
         self.pkt_count  = 0
         self.last_seen  = None
