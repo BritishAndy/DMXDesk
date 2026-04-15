@@ -94,7 +94,7 @@ def build_full_manual(path):
         p("A software lighting desk that outputs DMX over Art-Net UDP. "
           "Supports dimmers, RGB, RGBW and complex multi-channel fixtures, "
           "relay/digital fixtures, submasters, scenes with fade times, "
-          "a built-in clock and timer, QLab OSC integration, "
+          "a built-in clock and timer, live DMX grid monitor, QLab OSC integration, "
           "and a full patch editor with Open Fixture Library support.", 'body'),
         PageBreak(),
     ]
@@ -114,14 +114,15 @@ def build_full_manual(path):
             ("10. Copy & Paste",          "Copying fixture states"),
             ("11. Group Selection",       "Ganging fixtures together"),
             ("12. Clock & Timers",        "Clock, stopwatch, countdown"),
-            ("13. Patch Editor",          "Managing the fixture patch"),
-            ("14. Fixture Definitions",   "JSON fixture files explained"),
-            ("15. Open Fixture Library",  "Importing fixtures from OFL"),
-            ("16. Settings",              "Art-Net, appearance, behaviour, OSC"),
-            ("17. Save & Load",           "Saving shows and patches"),
-            ("18. QLab Integration",      "OSC control from QLab"),
-            ("19. Monitoring Tools",       "monitor_gui.py and monitor.py"),
-            ("20. Keyboard & Mouse",      "Quick reference"),
+            ("13. DMX Grid",              "Live DMX output monitor in the fixture panel"),
+            ("14. Patch Editor",          "Managing the fixture patch"),
+            ("15. Fixture Definitions",   "JSON fixture files explained"),
+            ("16. Open Fixture Library",  "Importing fixtures from OFL"),
+            ("17. Settings",              "Art-Net, appearance, behaviour, OSC"),
+            ("18. Save & Load",           "Saving shows and patches"),
+            ("19. QLab Integration",      "OSC control from QLab"),
+            ("20. Monitoring Tools",       "monitor_gui.py and monitor.py"),
+            ("21. Keyboard & Mouse",      "Quick reference"),
         ], col_widths=[60*mm, 105*mm]),
         PageBreak(),
     ]
@@ -290,7 +291,32 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("13. Patch Editor"),
+        section_title("13. DMX Grid"),
+        p("The DMX Grid is an optional panel that can be added to the fixture area. "
+          "It shows all 512 DMX output channels as a compact 32x16 grid, "
+          "reading directly from the desk output — no network monitoring needed."),
+        sp(2),
+        p('Add via <b>+ Add DMX Grid</b> in the patch editor, or manually:', 'body'),
+        p('  {"type": "dmxgrid", "name": "DMX Grid", "row": 1}', 'kbd'),
+        sp(2),
+        sub("Colour Coding"),
+        key_table([
+            ("Green",  "Channel value is rising."),
+            ("Red",    "Channel value is falling."),
+            ("Blue",   "Channel has been steady for ~1.5 seconds."),
+            ("Dark",   "Channel is at zero."),
+        ]),
+        sp(2),
+        sub("Tooltip"),
+        p("Hover over any cell to see the channel number, fixture name and current value "
+          "in the tooltip bar above the colour key."),
+        sp(2),
+        p("Scales with zoom and updates at 10Hz. Useful for confirming what DMX "
+          "is being sent during fades or when submasters are active.", 'note'),
+    ]
+
+    story += [
+        section_title("14. Patch Editor"),
         sub("Selecting"),
         key_table([
             ("Single-click",   "Select row."),
@@ -303,6 +329,7 @@ def build_full_manual(path):
             ("+ Add Sub",        "New submaster."),
             ("+ Add Divider",    "Visual separator."),
             ("+ Add Clock",      "Clock/timer widget."),
+            ("+ Add DMX Grid",   "Live DMX output grid monitor."),
         ]),
         sp(2), sub("Other"),
         key_table([
@@ -316,7 +343,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("14. Fixture Definitions"),
+        section_title("15. Fixture Definitions"),
         sub("Channel Fields"),
         key_table([
             ("label",   "Channel name. R/G/B/W/A/UV for colour channels."),
@@ -334,7 +361,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("15. Open Fixture Library"),
+        section_title("16. Open Fixture Library"),
         key_table([
             ("First use",    "Fetches index from GitHub. Cached in ofl_fixtures.json."),
             ("Manufacturer", "Filter by manufacturer (e.g. chauvet, robe)."),
@@ -345,7 +372,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("16. Settings"),
+        section_title("17. Settings"),
         sub("Art-Net"),
         key_table([
             ("Target IP", "IP address of your Art-Net node."),
@@ -371,7 +398,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("17. Save & Load"),
+        section_title("18. Save & Load"),
         sub("Show Files"),
         p("Scenes save automatically to the loaded show file on every change. "
           "The filename appears in the top bar. "
@@ -383,7 +410,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("18. QLab Integration"),
+        section_title("19. QLab Integration"),
         p("The desk receives OSC from QLab to recall scenes automatically. "
           "Art-Net HTP merge at the node allows both to send simultaneously."),
         sp(2), sub("QLab Setup"),
@@ -407,7 +434,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("19. Monitoring Tools"),
+        section_title("20. Monitoring Tools"),
         sub("monitor_gui.py — GUI Monitor (recommended)"),
         p("A tkinter companion application for testing and diagnosing DMX output. "
           "Run alongside desk.py on the same machine or any Mac on the same network."),
@@ -437,7 +464,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("20. Keyboard & Mouse"),
+        section_title("21. Keyboard & Mouse"),
         key_table([
             ("Ctrl+click fixture",       "Copy fixture state"),
             ("Click green fixture",      "Paste copied state"),

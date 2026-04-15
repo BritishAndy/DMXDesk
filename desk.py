@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 78
+BUILD   = 85
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -112,7 +112,7 @@ def send_defaults(patch: list):
     defaults = bytearray(512)
     for fix in patch:
         ftype = fix.get("type", "").lower()
-        if ftype in ("submaster", "divider", "clock"):
+        if ftype in ("submaster", "divider", "clock", "dmxgrid"):
             continue
         address = fix.get("address")
         if not address:
@@ -1179,6 +1179,171 @@ class SubmasterWidget(tk.Frame):
                 fw.apply_gm(gm2)
 
 
+
+# ── DMXGridWidget ──────────────────────────────────────────────────────────────
+
+class DMXGridWidget(tk.Frame):
+    """
+    Compact 32x16 grid showing all 512 DMX output channels.
+    Colour coded by direction: green=rising, red=falling, blue=steady, dark=zero.
+    Reads directly from dmx_values[] — no network monitoring needed.
+    Updates at 10Hz.
+    """
+
+    # Direction colours
+    _COL_ZERO    = "#2a2a2a"
+    _COL_RISING  = "#1a5c1a"
+    _COL_FALLING = "#5c1a1a"
+    _COL_STEADY  = "#1a2a5c"
+    _FG_ZERO     = "#444444"
+    _FG_RISING   = "#44ff44"
+    _FG_FALLING  = "#ff4444"
+    _FG_STEADY   = "#6699ff"
+    _STEADY_THRESHOLD = 15   # frames before showing blue (~1.5s)
+
+    def __init__(self, parent, name="DMX Grid", sz=None, channel_names=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.name          = name
+        self._ch_names     = channel_names or {}
+        sz = sz or DEFAULT_SIZES
+        zoom = sz.get("zoom", 1.0)
+
+        self.configure(bg="#1a1a1a", relief=tk.RIDGE, bd=2,
+                       highlightthickness=2, highlightbackground="#1a1a1a")
+
+        self._prev    = [0] * 512
+        self._steady  = [0] * 512
+        self._dir     = [0] * 512   # 1=rising, -1=falling
+        self._cells   = {}          # {ch_idx: label}
+        self._after_id = None
+
+        # Scale font and cell size with zoom
+        cell_font = ("Courier", max(5, int(6 * zoom)))
+        cell_w    = max(2, int(3 * zoom))
+
+        # Title
+        tk.Label(self, text=name, bg="#1a1a1a", fg="#ffcc00",
+                 font=("Helvetica", max(7, int(8 * zoom)), "bold"),
+                 anchor="w").pack(fill=tk.X, padx=4, pady=(2, 0))
+
+        # Column headers
+        COLS = 32
+        hdr_frame = tk.Frame(self, bg="#1a1a1a")
+        hdr_frame.pack(fill=tk.X, padx=2)
+        tk.Label(hdr_frame, text="   ", bg="#1a1a1a", fg="#444444",
+                 font=cell_font, width=3).grid(row=0, column=0)
+        for c in range(COLS):
+            tk.Label(hdr_frame, text=str(c+1), bg="#1a1a1a", fg="#444444",
+                     font=cell_font, width=cell_w,
+                     anchor="center").grid(row=0, column=c+1, padx=1)
+
+        # Grid
+        grid_frame = tk.Frame(self, bg="#1a1a1a")
+        grid_frame.pack(fill=tk.X, padx=2, pady=(0, 2))
+
+        for row in range(16):
+            base = row * COLS
+            tk.Label(grid_frame, text=f"{base+1:>3}", bg="#1a1a1a", fg="#444444",
+                     font=cell_font, width=3).grid(row=row, column=0, padx=(2,3))
+            for col in range(COLS):
+                ch = base + col
+                lbl = tk.Label(grid_frame, text=" 0 ",
+                               bg=self._COL_ZERO, fg=self._FG_ZERO,
+                               font=cell_font, width=cell_w,
+                               relief=tk.FLAT, anchor="center")
+                lbl.grid(row=row, column=col+1, padx=1, pady=1)
+                lbl.bind("<Enter>", lambda e, c=ch: self._show_tooltip(c))
+                self._cells[ch] = lbl
+
+        # Tooltip bar
+        self._tooltip_var = tk.StringVar(value="Hover over a cell for channel info")
+        tk.Label(self, textvariable=self._tooltip_var, bg="#222222", fg="#aaaaaa",
+                 font=("Helvetica", max(6, int(7 * zoom))),
+                 anchor="w").pack(fill=tk.X, padx=2, pady=(0,1))
+
+        # Colour key
+        key = tk.Frame(self, bg="#1a1a1a")
+        key.pack(fill=tk.X, padx=4, pady=(0, 2))
+        for text, fg in [("● Rising", self._FG_RISING),
+                         ("● Falling", self._FG_FALLING),
+                         ("● Steady",  self._FG_STEADY),
+                         ("● Zero",    self._FG_ZERO)]:
+            tk.Label(key, text=text, bg="#1a1a1a", fg=fg,
+                     font=("Helvetica", max(6, int(7 * zoom)))).pack(
+                     side=tk.LEFT, padx=4)
+
+        self._schedule()
+
+    def _show_tooltip(self, ch_idx):
+        ch   = ch_idx + 1
+        val  = dmx_values[ch_idx]
+        name = self._ch_names.get(ch, "")
+        pct  = int(val / 255 * 100)
+        text = f"ch {ch}"
+        if name:
+            text += f"  —  {name}"
+        text += f"  =  {val}  ({pct}%)"
+        self._tooltip_var.set(text)
+
+    def _schedule(self):
+        self._after_id = self.after(100, self._refresh)
+
+    def _refresh(self):
+        try:
+            now = dmx_values  # direct reference to the global DMX array
+            for ch in range(512):
+                v = now[ch]
+                p = self._prev[ch]
+                if v > p:
+                    self._dir[ch]    = 1
+                    self._steady[ch] = 0
+                    bg, fg = self._COL_RISING, self._FG_RISING
+                elif v < p:
+                    self._dir[ch]    = -1
+                    self._steady[ch] = 0
+                    bg, fg = self._COL_FALLING, self._FG_FALLING
+                else:
+                    self._steady[ch] = min(self._steady[ch] + 1,
+                                           self._STEADY_THRESHOLD)
+                    if v == 0:
+                        self._dir[ch] = 0
+                        bg, fg = self._COL_ZERO, self._FG_ZERO
+                    elif self._steady[ch] >= self._STEADY_THRESHOLD:
+                        bg, fg = self._COL_STEADY, self._FG_STEADY
+                    else:
+                        # Hold last direction during transition
+                        if self._dir[ch] == 1:
+                            bg, fg = self._COL_RISING, self._FG_RISING
+                        elif self._dir[ch] == -1:
+                            bg, fg = self._COL_FALLING, self._FG_FALLING
+                        else:
+                            bg, fg = self._COL_STEADY, self._FG_STEADY
+
+                lbl = self._cells[ch]
+                if lbl.cget("bg") != bg or lbl.cget("fg") != fg:
+                    lbl.config(bg=bg, fg=fg, text=f"{v:>3}")
+                elif lbl.cget("text").strip() != str(v):
+                    lbl.config(text=f"{v:>3}")
+
+            self._prev = list(now)
+            self._schedule()
+        except Exception:
+            self._schedule()
+
+    def destroy(self):
+        if self._after_id:
+            try: self.after_cancel(self._after_id)
+            except Exception: pass
+        super().destroy()
+
+    # ── Compatibility interface (same as ClockWidget stubs) ───────────────────
+    def is_soloed(self):                          return False
+    def get_state(self):                          return {}
+    def get_soloed_state(self):                   return {}
+    def set_state(self, state):                   pass
+    def illuminate_solos_from_state(self, state): pass
+    def apply_gm(self, gm):                       pass
+
 # ── ClockWidget ────────────────────────────────────────────────────────────────
 
 class ClockWidget(tk.Frame):
@@ -2131,7 +2296,8 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
     sbtn("＋ Add Fixture",   "#224422", "#88ff88",  lambda: _add_row("dimmer"))
     sbtn("＋ Add Sub",       "#223333", "#44ffdd",  lambda: _add_row("submaster"))
     sbtn("＋ Add Divider",   "#222244", "#8888ff",  lambda: _add_row("divider"))
-    sbtn("＋ Add Clock",     "#332233", "#cc88ff",  lambda: _add_row("clock"), sep_after=True)
+    sbtn("＋ Add Clock",     "#332233", "#cc88ff",  lambda: _add_row("clock"))
+    sbtn("＋ Add DMX Grid",  "#222233", "#88ccff",  lambda: _add_row("dmxgrid"), sep_after=True)
     sbtn("▲ Up",             "#2a2a2a", FGA,        lambda: _move_up())
     sbtn("▼ Down",           "#2a2a2a", FGA,        lambda: _move_down(), sep_after=True)
     sbtn("✕ Delete",         "#442222", "#ff8888",  lambda: _delete_row())
@@ -2288,7 +2454,11 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         if ftype == "submaster":
             new_row["name"] = "New Sub"
             new_row["targets"] = []
-        elif ftype not in ("divider", "clock"):
+        elif ftype == "dmxgrid":
+            new_row["name"] = "DMX Grid"
+        elif ftype == "clock":
+            new_row["name"] = "Clock"
+        elif ftype != "divider":
             new_row["name"] = "New Fixture"
             new_row["address"] = max_addr
         ins = (max(selected) + 1) if selected else len(rows)
@@ -2412,7 +2582,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
 
         def _on_type_change(*_):
             t = type_var.get().lower()
-            is_fixture   = t not in ("divider", "clock", "submaster")
+            is_fixture   = t not in ("divider", "clock", "submaster", "dmxgrid")
             is_submaster = t == "submaster"
             is_named     = t not in ("divider", "clock")
             name_e.configure(state="normal" if is_named else "disabled")
@@ -2482,7 +2652,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         addr_map = {}
         for i, r in enumerate(rows):
             ftype = r.get("type","").lower()
-            if ftype in ("divider","clock"): continue
+            if ftype in ("divider","clock","dmxgrid"): continue
             if not r.get("name"):
                 errors.append(f"Row {i+1}: missing name")
             if ftype == "submaster":
@@ -3452,7 +3622,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
 
     regular_defs   = [(f, load_fixture_def(f["type"])) for f in patch
-                      if f.get("type", "").lower() not in ("submaster", "divider", "clock")]
+                      if f.get("type", "").lower() not in ("submaster", "divider", "clock", "dmxgrid")]
     submaster_defs = [f for f in patch if f.get("type", "").lower() == "submaster"]
     # Dividers are rendered inline during rebuild — extract with row info
     divider_entries = [f for f in patch if f.get("type", "").lower() == "divider"]
@@ -3475,7 +3645,7 @@ def build_ui(patch: list, patch_path: Path = None):
         patch.clear()
         patch.extend(new_patch)
         new_regular = []
-        skip_types = ("submaster", "divider", "clock")
+        skip_types = ("submaster", "divider", "clock", "dmxgrid")
         for fi in new_patch:
             ftype = fi.get("type", "").lower()
             if ftype in skip_types:
@@ -3546,6 +3716,28 @@ def build_ui(patch: list, patch_path: Path = None):
                     w.restore_clock_state(clock_states[cname])
                 clock_widgets.append(w)
                 # ClockWidget is not a DMX fixture — don't add to fixture_widgets
+            elif ftype == "dmxgrid":
+                parent = row_bot if f.get("row", 1) == 2 else row_top
+                # Build channel name lookup from patch
+                _ch_names = {}
+                for _pf in patch:
+                    _pft = _pf.get("type","").lower()
+                    if _pft in ("submaster","divider","clock","dmxgrid"): continue
+                    _addr = _pf.get("address")
+                    if not _addr: continue
+                    try:
+                        _defn = load_fixture_def(_pft)
+                        for _i, _ch in enumerate(_defn.get("channels",[])):
+                            _lbl = _ch.get("label", str(_i+1))
+                            _dmxch = _addr + _i
+                            if 1 <= _dmxch <= 512:
+                                _ch_names[_dmxch] = _pf["name"] if _ch.get("master") else f"{_pf['name']} {_lbl}"
+                    except Exception:
+                        _ch_names[_addr] = _pf.get("name","?")
+                w = DMXGridWidget(parent, name=f.get("name", "DMX Grid"), sz=sz,
+                                  channel_names=_ch_names)
+                w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
+                # DMXGridWidget is not a DMX fixture — don't add to fixture_widgets
             elif ftype not in ("submaster",):
                 try:
                     f2, defn = next(reg_iter)
