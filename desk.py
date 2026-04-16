@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 85
+BUILD   = 87
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -3856,7 +3856,9 @@ def build_ui(patch: list, patch_path: Path = None):
         if _scene_fade_active[0]: return
         win = tk.Toplevel(root)
         win.title(f"Edit Scene {slot}")
-        win.configure(bg="#1a1a1a"); win.resizable(False, False); win.grab_set()
+        win.configure(bg="#1a1a1a"); win.resizable(False, False)
+        win.grab_set()
+        win.protocol("WM_DELETE_WINDOW", lambda: (win.grab_release(), win.destroy()))
 
         # Name
         tk.Label(win, text=f"Name for scene {slot}:", bg="#1a1a1a", fg="#aaaaaa",
@@ -3881,9 +3883,11 @@ def build_ui(patch: list, patch_path: Path = None):
 
         def _pick_colour():
             from tkinter import colorchooser
+            win.grab_release()
             c = colorchooser.askcolor(
                 color=colour_var.get() or "#336633",
                 title="Scene button colour", parent=win)
+            win.grab_set()
             if c and c[1]:
                 colour_var.set(c[1])
                 swatch.config(bg=c[1])
@@ -3912,7 +3916,7 @@ def build_ui(patch: list, patch_path: Path = None):
                 if col: scenes[slot]["colour"] = col
                 else:   scenes[slot].pop("colour", None)
                 save_scenes_to_disk()
-            _refresh_buttons(); win.destroy()
+            _refresh_buttons(); win.grab_release(); win.destroy()
 
         entry.bind("<Return>", _confirm)
         btn(win, "OK", bg="#225522", fg="#ffffff",
@@ -4055,12 +4059,13 @@ def build_ui(patch: list, patch_path: Path = None):
     def _do_go(slot):
         if _scene_fade_active[0]: return
         _select_slot(slot)
-        if slot in scenes:
-            fade_var.set(str(scenes[slot].get("fade", 0.0)))
+        if slot not in scenes:
+            return  # empty slot — nothing to recall
+        fade_var.set(str(scenes[slot].get("fade", 0.0)))
         _scene_fade_stop[0] = False
         _set_scene_buttons_state(tk.DISABLED)
         def _on_done():
-            if not _scene_fade_stop[0]:  # only re-enable if not already stopped
+            if not _scene_fade_stop[0]:
                 _set_scene_buttons_state(tk.NORMAL)
         recall_scene(slot, all_widgets, root, on_complete=_on_done, stop_flag=_scene_fade_stop)
 
