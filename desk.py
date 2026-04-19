@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 87
+BUILD   = 98
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -295,12 +295,17 @@ def btn(parent, text, bg, fg, command=None, **kw):
 
 # ── SoloButton ─────────────────────────────────────────────────────────────────
 
-SOLO_OFF_BG = "#333333"; SOLO_OFF_FG = "#666666"
-SOLO_ON_BG  = "#ddaa00"; SOLO_ON_FG  = "#000000"
+SOLO_OFF_BG  = "#333333"; SOLO_OFF_FG  = "#666666"
+SOLO_ON_BG   = "#ddaa00"; SOLO_ON_FG   = "#000000"
+SOLO_LOCK_BG = "#880000"; SOLO_LOCK_FG = "#ffffff"
 
 class SoloButton(tk.Label):
+    """Three-state button: off → solo (amber) → locked (red) → off.
+    Locked channels are excluded from scene recalls."""
+
     def __init__(self, parent, **kw):
         self._soloed = False
+        self._locked = False
         self._command = None
         super().__init__(parent, text="S", bg=SOLO_OFF_BG, fg=SOLO_OFF_FG,
                          font=("Helvetica", 6, "bold"), cursor="hand2",
@@ -308,21 +313,57 @@ class SoloButton(tk.Label):
         self.bind("<ButtonRelease-1>", self._on_release)
 
     def _on_release(self, _=None):
-        self._soloed = not self._soloed
-        self.config(bg=SOLO_ON_BG if self._soloed else SOLO_OFF_BG,
-                    fg=SOLO_ON_FG if self._soloed else SOLO_OFF_FG)
+        if not self._soloed and not self._locked:
+            # off → solo
+            self._soloed = True
+            self._locked = False
+            self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
+        elif self._soloed and not self._locked:
+            # solo → locked
+            self._soloed = False
+            self._locked = True
+            self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
+        else:
+            # locked → off
+            self._soloed = False
+            self._locked = False
+            self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
         if self._command: self._command()
+
+    def _update_display(self):
+        if self._locked:
+            self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
+        elif self._soloed:
+            self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
+        else:
+            self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
 
     @property
     def soloed(self): return self._soloed
 
+    @property
+    def locked(self): return self._locked
+
     def reset(self):
+        """Clear solo only — preserve lock."""
         self._soloed = False
-        self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
+        self._update_display()
+
+    def unlock(self):
+        """Clear lock and solo."""
+        self._soloed = False
+        self._locked = False
+        self._update_display()
 
     def set_on(self):
         self._soloed = True
+        self._locked = False
         self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
+
+    def lock(self):
+        self._soloed = False
+        self._locked = True
+        self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
 
 # ── Size system ────────────────────────────────────────────────────────────────
 
@@ -769,6 +810,23 @@ class CustomFixture(tk.Frame):
     def is_soloed(self) -> bool:
         if self.fixture_solo.soloed: return True
         return any(sb.soloed for sb in self._ch_solos.values())
+
+    def _locked_channel_indices(self) -> set:
+        """Return set of orig channel indices that are locked (excluded from recall)."""
+        if self.fixture_solo.locked:
+            s = set()
+            if self._master_idx is not None: s.add(self._master_idx)
+            for i, _ in self._visible: s.add(i)
+            return s
+        return {i for i, sb in self._ch_solos.items() if sb.locked}
+
+    def any_locked(self):
+        return self.fixture_solo.locked or any(sb.locked for sb in self._ch_solos.values())
+
+    def clear_locks(self):
+        self.fixture_solo.unlock()
+        for sb in self._ch_solos.values():
+            sb.unlock()
 
     def _soloed_channel_indices(self) -> set:
         """Return set of orig channel indices that are soloed.
@@ -1706,9 +1764,18 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
             fw.illuminate_solos_from_state(None)
 
     # Only apply to widgets present in this scene
-    active_pairs = [(by_name[name], state)
+    # Filter out locked channels from each fixture's state
+    def _filter_locked(fw, state):
+        if not hasattr(fw, '_locked_channel_indices'): return state
+        locked = fw._locked_channel_indices()
+        if not locked: return state
+        return {k: v for k, v in state.items() if int(k) not in locked}
+
+    active_pairs = [(by_name[name], _filter_locked(by_name[name], state))
                     for name, state in fixture_states.items()
                     if name in by_name and state]
+    # Skip fixtures that are fully locked (empty state after filtering)
+    active_pairs = [(fw, st) for fw, st in active_pairs if st]
 
     if fade_time <= 0:
         for fw, state in active_pairs:
@@ -1718,7 +1785,8 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
         if on_complete: on_complete()
         return
 
-    start_states = [(fw, fw.get_state(), state) for fw, state in active_pairs]
+    start_states = [(fw, fw.get_state(), _filter_locked(fw, state))
+                     for fw, state in active_pairs if _filter_locked(fw, state)]
     steps = max(1, int(fade_time * _fade_steps_sec))
     interval = int(fade_time * 1000 / steps)
     step_ref = [0]
@@ -3815,12 +3883,13 @@ def build_ui(patch: list, patch_path: Path = None):
     scene_bar.pack(fill=tk.X, padx=10, pady=(0, 10))
 
     selected_slot = tk.IntVar(value=1)
+    _context_slot = [None]   # slot currently open in context panel
     go_buttons = {}
 
     def _slot_bg(s):
-        if s == selected_slot.get(): return "#cc8800"
+        if s == _context_slot[0]:    return "#003366"   # blue — context panel open
+        if s == selected_slot.get(): return "#cc8800"   # gold — last recalled
         if s in scene_colours:
-            # Blend scene colour toward dark background
             try:
                 c = scene_colours[s].lstrip("#")
                 r = int(int(c[0:2], 16) * 0.35)
@@ -3831,7 +3900,8 @@ def build_ui(patch: list, patch_path: Path = None):
                 pass
         return "#1a4a1a" if s in scenes else "#333333"
     def _slot_fg(s):
-        if s == selected_slot.get(): return "#000000"
+        if s == _context_slot[0]:    return "#88ccff"   # blue text for context
+        if s == selected_slot.get(): return "#000000"   # black on gold
         return "#ffffff" if s in scenes else "#aaaaaa"
 
     def _rebuild_scene_buttons():
@@ -3948,8 +4018,7 @@ def build_ui(patch: list, patch_path: Path = None):
         if slot in scene_colours: scenes[slot]["colour"] = scene_colours[slot]
         save_scenes_to_disk()
         _refresh_buttons()
-        rec_btn.config(bg="#ddaa00", fg="#000000")
-        root.after(180, lambda: rec_btn.config(bg="#aa3300", fg="#ffffff"))
+        pass  # flash handled by context panel
 
     def _do_clr():
         slot = selected_slot.get()
@@ -4043,6 +4112,214 @@ def build_ui(patch: list, patch_path: Path = None):
             stop_fade_btn._active_bg = "#444444"
             stop_fade_btn._active_fg = "#555555"
 
+    # ── Scene context panel ──────────────────────────────────────────────────
+    _context_panel = [None]
+
+    def _close_context():
+        p = _context_panel[0]
+        if p and p.winfo_exists():
+            try:
+                bp_id = getattr(p, '_bp_id', None)
+                if bp_id:
+                    root.unbind("<ButtonPress>", bp_id)
+            except Exception:
+                pass
+            p.destroy()
+        _context_panel[0] = None
+        _context_slot[0]  = None
+        _refresh_buttons()
+
+    def _scene_context(slot, x, y):
+        """Comprehensive right-click panel for scene operations."""
+        _close_context()
+        if _scene_fade_active[0]: return
+        _context_slot[0] = slot
+        _refresh_buttons()
+
+        panel = tk.Toplevel(root)
+        panel.overrideredirect(True)
+        panel.configure(bg="#222222", bd=2, relief=tk.RIDGE)
+        panel.attributes("-topmost", True)
+        _context_panel[0] = panel
+
+        _bp_id = root.bind("<ButtonPress>", lambda e: _close_context(), add="+")
+        panel._bp_id = _bp_id
+
+        slot_name   = scene_names.get(slot, f"Scene {slot}")
+        has_scene   = slot in scenes
+        cur_colour  = scene_colours.get(slot, "")
+
+        # ── Header ──
+        tk.Label(panel, text=f"  Scene {slot}",
+                 bg="#333333", fg="#ffcc00",
+                 font=("Helvetica", 10, "bold"),
+                 anchor="w", padx=4, pady=5).pack(fill=tk.X)
+
+        inner = tk.Frame(panel, bg="#222222")
+        inner.pack(fill=tk.X, padx=8, pady=6)
+
+        def row_lbl(text):
+            tk.Label(inner, text=text, bg="#222222", fg="#888888",
+                     font=("Helvetica", 8), anchor="w").pack(fill=tk.X)
+
+        # ── Name ──
+        row_lbl("Name")
+        name_var = tk.StringVar(value=slot_name)
+        tk.Entry(inner, textvariable=name_var, width=22,
+                 bg="#333333", fg="#ffcc00", insertbackground="#ffcc00",
+                 font=("Helvetica", 10), relief=tk.FLAT, bd=3).pack(
+                 fill=tk.X, pady=(0,6))
+
+        # ── Colour ──
+        row_lbl("Button colour")
+        colour_row = tk.Frame(inner, bg="#222222")
+        colour_row.pack(fill=tk.X, pady=(0,6))
+        colour_var = tk.StringVar(value=cur_colour)
+        swatch = tk.Frame(colour_row, width=28, height=20,
+                          bg=cur_colour if cur_colour else "#333333",
+                          relief=tk.RIDGE, bd=1)
+        swatch.pack(side=tk.LEFT, padx=(0,5))
+
+        def _pick():
+            from tkinter import colorchooser
+            panel.grab_release()
+            c = colorchooser.askcolor(
+                color=colour_var.get() or "#336633",
+                title="Scene colour", parent=panel)
+            panel.grab_set()
+            if c and c[1]:
+                colour_var.set(c[1])
+                swatch.config(bg=c[1])
+
+        def _clear_col():
+            colour_var.set("")
+            swatch.config(bg="#333333")
+
+        btn(colour_row, "Choose…", bg="#333333", fg="#aaaaaa",
+            font=("Helvetica", 8), pady=1,
+            command=_pick).pack(side=tk.LEFT, padx=(0,3))
+        btn(colour_row, "Clear", bg="#333333", fg="#aaaaaa",
+            font=("Helvetica", 8), pady=1,
+            command=_clear_col).pack(side=tk.LEFT)
+
+        # ── Fade time ──
+        row_lbl("Fade (s)")
+        panel_fade_var = tk.StringVar(
+            value=str(scenes[slot].get("fade", fade_var.get()))
+                  if has_scene else fade_var.get())
+        tk.Entry(inner, textvariable=panel_fade_var, width=6,
+                 bg="#333333", fg="#ffcc00", insertbackground="#ffcc00",
+                 font=("Courier", 10), justify=tk.LEFT,
+                 relief=tk.FLAT, bd=3).pack(fill=tk.X, pady=(0,8))
+
+        # ── Divider ──
+        tk.Frame(inner, bg="#444444", height=1).pack(fill=tk.X, pady=(0,6))
+
+        def _apply_name_colour():
+            """Save name and colour without recording."""
+            name = name_var.get().strip() or f"Scene {slot}"
+            scene_names[slot] = name
+            col = colour_var.get().strip()
+            if col: scene_colours[slot] = col
+            else:   scene_colours.pop(slot, None)
+            if slot in scenes:
+                scenes[slot]["name"]   = name
+                if col: scenes[slot]["colour"] = col
+                else:   scenes[slot].pop("colour", None)
+                save_scenes_to_disk()
+            _refresh_buttons()
+
+        def _do_panel_rec():
+            try:    fv = max(0.0, float(panel_fade_var.get()))
+            except: fv = 0.0
+            fade_var.set(str(fv))
+            _apply_name_colour()
+            _close_context()
+            if any_soloed(all_widgets):
+                from tkinter import messagebox as _mb
+                answer = _mb.askyesnocancel(
+                    "Solos Active",
+                    "Some channels are soloed.\n\n"
+                    "Yes = clear solos and record all\n"
+                    "No = record with solos (partial)\n"
+                    "Cancel = do not record",
+                    parent=root)
+                if answer is None: return
+                if answer: _do_clear_solos()
+            store_scene(slot, all_widgets, fv)
+            if slot in scene_names: scenes[slot]["name"] = scene_names[slot]
+            if slot in scene_colours: scenes[slot]["colour"] = scene_colours[slot]
+            save_scenes_to_disk()
+            _refresh_buttons()
+
+        def _do_panel_clr():
+            _close_context()
+            if slot not in scenes: return
+            if messagebox.askyesno("Clear Scene",
+                    f"Clear scene {slot}? This cannot be undone.",
+                    parent=root):
+                clear_scene(slot)
+                scene_names.pop(slot, None)
+                scene_colours.pop(slot, None)
+                _refresh_buttons()
+
+        def _do_panel_save():
+            _apply_name_colour()
+            _close_context()
+
+        btn(inner, "⏺  Record",  "#aa3300", "#ffffff",
+            font=("Helvetica", 10, "bold"), pady=4,
+            command=_do_panel_rec).pack(fill=tk.X, pady=(0,2))
+        btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
+            font=("Helvetica", 9), pady=3,
+            command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+        if has_scene:
+            btn(inner, "✕  Clear scene", "#442222", "#ff8888",
+                font=("Helvetica", 9), pady=3,
+                command=_do_panel_clr).pack(fill=tk.X, pady=(0,2))
+        btn(inner, "✕  Close", "#333333", "#888888",
+            font=("Helvetica", 8), pady=2,
+            command=_close_context).pack(fill=tk.X, pady=(4,0))
+
+        # Position near button, stay on screen
+        panel.update_idletasks()
+        pw = panel.winfo_reqwidth()
+        ph = panel.winfo_reqheight()
+        sw = root.winfo_screenwidth()
+        sh = root.winfo_screenheight()
+        px = min(x + 4, sw - pw - 8)
+        py = min(y + 4, sh - ph - 8)
+        panel.geometry(f"+{px}+{py}")
+        panel.deiconify()
+        panel.lift()
+        panel.attributes("-topmost", True)
+        # Defer grab and focus so panel is fully drawn first
+        def _activate():
+            try:
+                panel.lift()
+                panel.attributes("-topmost", True)
+                panel.focus_force()
+                panel.grab_set()
+                # Find first Entry widget and focus it
+                for w in inner.winfo_children():
+                    if isinstance(w, tk.Entry):
+                        w.focus_set()
+                        w.select_range(0, tk.END)
+                        break
+            except Exception:
+                pass
+        panel.after(50, _activate)
+        # Keep lifting every 200ms in case another window comes forward
+        def _keep_top():
+            try:
+                if panel.winfo_exists():
+                    panel.lift()
+                    panel.after(200, _keep_top)
+            except Exception:
+                pass
+        panel.after(100, _keep_top)
+
+
     def _do_stop_fade():
         if not _scene_fade_active[0]: return
         _scene_fade_stop[0]   = True
@@ -4070,6 +4347,7 @@ def build_ui(patch: list, patch_path: Path = None):
         recall_scene(slot, all_widgets, root, on_complete=_on_done, stop_flag=_scene_fade_stop)
 
     def _do_clear_solos():
+        """Clear solos only — locks are preserved."""
         for fw in all_widgets:
             if isinstance(fw, DigitalFixture):
                 fw.fixture_solo.reset()
@@ -4080,6 +4358,12 @@ def build_ui(patch: list, patch_path: Path = None):
                 for sb in fw._ch_solos.values(): sb.reset()
             else:
                 fw.solo_btn.reset()
+
+    def _do_clear_locks():
+        """Clear all channel locks across all fixtures."""
+        for fw in all_widgets:
+            if isinstance(fw, CustomFixture):
+                fw.clear_locks()
 
     def _do_zoom(delta):
         new_zoom = round(zoom_level[0] + delta, 2)
@@ -4101,18 +4385,6 @@ def build_ui(patch: list, patch_path: Path = None):
     ctrl_strip.pack(fill=tk.X, padx=6, pady=(2, 4))
 
     # Controls strip — left side
-    rec_btn = btn(ctrl_strip, "⏺  REC", bg="#aa3300", fg="#ffffff",
-                  font=("Helvetica", 11, "bold"), width=7, pady=6, command=_do_rec)
-    rec_btn.pack(side=tk.LEFT, padx=(0, 3))
-    btn(ctrl_strip, "✕  CLR", bg="#444444", fg="#ff8888",
-        font=("Helvetica", 11, "bold"), width=7, pady=6,
-        command=_do_clr).pack(side=tk.LEFT, padx=(0, 10))
-    tk.Label(ctrl_strip, text="Fade (s)", bg="#111111", fg="#aaaaaa",
-             font=("Helvetica", 9)).pack(side=tk.LEFT, padx=(0, 3))
-    tk.Entry(ctrl_strip, textvariable=fade_var, width=4,
-             bg="#333333", fg="#ffcc00", insertbackground="#ffcc00",
-             font=("Courier", 11), justify=tk.CENTER,
-             relief=tk.FLAT, bd=4).pack(side=tk.LEFT, padx=(0, 10))
     stop_fade_btn = btn(ctrl_strip, "◼ STOP FADE", bg="#333333", fg="#555555",
         font=("Helvetica", 9, "bold"), pady=6,
         command=lambda: _do_stop_fade())
@@ -4120,7 +4392,10 @@ def build_ui(patch: list, patch_path: Path = None):
 
     btn(ctrl_strip, "CLEAR SOLOS", bg="#332200", fg="#ddaa00",
         font=("Helvetica", 9, "bold"), pady=6,
-        command=_do_clear_solos).pack(side=tk.LEFT, padx=(0, 6))
+        command=_do_clear_solos).pack(side=tk.LEFT, padx=(0, 3))
+    btn(ctrl_strip, "CLEAR LOCKS", bg="#330000", fg="#ff6666",
+        font=("Helvetica", 9, "bold"), pady=6,
+        command=_do_clear_locks).pack(side=tk.LEFT, padx=(0, 6))
     btn(ctrl_strip, "💾 SAVE", bg="#223344", fg="#88bbff",
         font=("Helvetica", 9, "bold"), pady=6,
         command=_do_save_show).pack(side=tk.LEFT, padx=(0, 3))
@@ -4177,7 +4452,8 @@ def build_ui(patch: list, patch_path: Path = None):
         return None
 
     def _drag_start(e, slot):
-        _drag_state["src"] = slot
+        _drag_state["src"]     = slot
+        _drag_state["dragged"] = False
         b = go_buttons[slot]
         _drag_state["orig_bg"] = _slot_bg(slot)
         _drag_state["orig_fg"] = _slot_fg(slot)
@@ -4185,6 +4461,7 @@ def build_ui(patch: list, patch_path: Path = None):
                     highlightbackground="#ffaa00", highlightthickness=2)
 
     def _drag_motion(e, slot):
+        _drag_state["dragged"] = True
         # Find which button is under the pointer
         wx = e.widget.winfo_rootx() + e.x
         wy = e.widget.winfo_rooty() + e.y
@@ -4267,15 +4544,15 @@ def build_ui(patch: list, patch_path: Path = None):
                       font=("Helvetica", 9, "bold"), pady=6, padx=2,
                       height=2, justify=tk.CENTER,
                       command=lambda s=slot: _do_go(s))
-        b.bind("<Double-Button-1>", lambda e, s=slot: _rename_slot(s))
-        b.bind("<Button-2>",               lambda e: "break")
-        b.bind("<Button-3>",               lambda e: "break")
-        b.bind("<Double-Button-3>",        lambda e, s=slot: _rename_slot(s))
+        b.bind("<Button-2>",   lambda e, s=slot: _scene_context(s, e.x_root, e.y_root))
+        b.bind("<Button-3>",   lambda e, s=slot: _scene_context(s, e.x_root, e.y_root))
 
         b.bind("<Configure>",       lambda e, btn=b: btn.config(wraplength=e.width - 4))
         b.bind("<Control-Button-1>",        lambda e, s=slot: _drag_start(e, s))
         b.bind("<Control-B1-Motion>",       lambda e, s=slot: _drag_motion(e, s))
-        b.bind("<Control-ButtonRelease-1>", lambda e, s=slot: _drag_end(e, s))
+        b.bind("<Control-ButtonRelease-1>", lambda e, s=slot: (
+                    _drag_end(e, s) if _drag_state.get("dragged")
+                    else _scene_context(s, e.x_root, e.y_root)))
         b.grid(row=grid_row, column=grid_col, sticky="ew", padx=2, pady=2)
         go_buttons[slot] = b
 

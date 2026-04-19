@@ -161,14 +161,12 @@ def build_full_manual(path):
           "Right double-click to edit name and colour. Ctrl+drag to reorder."),
         sp(3), sub("Footer - Controls Strip"),
         key_table([
-            ("REC",           "Record current output to selected scene."),
-            ("CLR",           "Clear selected scene (with confirmation)."),
-            ("Fade (s)",      "Fade time in seconds for scene recall."),
-            ("STOP FADE",     "Interrupts a running fade, leaving faders where they are. "
-                               "Lights amber during an active fade."),
-            ("CLEAR SOLOS",   "Clears all active solo buttons."),
-            ("SAVE / LOAD",   "Save or load a show file."),
-            ("- / +",         "Zoom 25% to 175% in 5% steps."),
+            ("STOP FADE",    "Interrupts a running fade, leaving faders where they are. Lights amber during an active fade."),
+            ("CLEAR SOLOS",  "Clears amber solo buttons. Locks are unaffected."),
+            ("CLEAR LOCKS",  "Clears all red channel locks across all fixtures."),
+            ("SAVE / LOAD",  "Save or load a show file."),
+            ("- / +",        "Zoom 25% to 175% in 5% steps."),
+            ("GRAND MASTER", "Scales all DMX output proportionally."),
             ("GRAND MASTER",  "Scales all DMX output proportionally."),
         ]),
     ]
@@ -230,10 +228,22 @@ def build_full_manual(path):
         sp(2), sub("Recalling"),
         p("Click a scene button. Buttons are disabled during a fade. "
           "Use STOP FADE to interrupt."),
-        sp(2), sub("Naming and Colour"),
-        p("Right double-click to open the Edit Scene dialog. "
-          "Set the name and optionally a button colour (shown as a dark tint). "
-          "Saved swatches in the colour picker are stored by macOS."),
+        sp(2), sub("Right-click panel"),
+        p("Right-click (or Ctrl+click on a trackpad) any scene button to open the scene panel. "
+          "The button highlights blue while open. The panel contains:"),
+        key_table([
+            ("Name",               "Edit the scene name."),
+            ("Button colour",      "Choose or clear the button tint colour."),
+            ("Fade (s)",           "Set the fade time for this scene."),
+            ("Record",             "Record current output to this scene."),
+            ("Save name/colour",   "Save name and colour without recording."),
+            ("Clear scene",        "Clear the scene (shown only if scene exists)."),
+        ]),
+        sp(2), sub("Highlights"),
+        key_table([
+            ("Gold",  "Last recalled scene (left-click)."),
+            ("Blue",  "Scene with context panel open."),
+        ]),
         sp(2), sub("Reordering"),
         p("Ctrl+drag a scene button to swap it with another slot. "
           "Data, name and colour all move together."),
@@ -253,12 +263,23 @@ def build_full_manual(path):
 
     story += [
         section_title("9. Solo & Record (Partial Scenes)"),
+        sub("Solo button states"),
         key_table([
-            ("S button",      "Solos that channel (amber)."),
-            ("Solo fix",      "Solos all channels; illuminates all S buttons."),
+            ("S — dark",   "Off (default)."),
+            ("S — amber",  "Soloed. Included in partial scene record."),
+            ("S — red",    "Locked. Excluded from all scene recalls until unlocked."),
+        ]),
+        sp(2),
+        p("Click S to cycle: off to solo to locked and back to off. "
+          "The fixture Solo fix button follows the same cycle for all channels at once."),
+        sp(2), sub("Recording and recalling"),
+        key_table([
             ("REC + solos",   "Dialog: clear solos and record all / record partial / cancel."),
-            ("CLEAR SOLOS",   "Clears all solos across all fixtures."),
-            ("Scene recall",  "Illuminates solo buttons for stored channels."),
+            ("CLEAR SOLOS",   "Clears amber solos. Red locks are unaffected."),
+            ("CLEAR LOCKS",   "Clears all red locks across all fixtures."),
+            ("Scene recall",  "Locked channels are silently skipped. "
+                               "Fixture solo lock excludes the entire fixture."),
+            ("Illuminate",    "Scene recall illuminates amber solos for channels stored in the scene."),
         ]),
     ]
 
@@ -471,7 +492,8 @@ def build_full_manual(path):
             ("Shift+click fixture",      "Add to / remove from group"),
             ("Escape",                   "Cancel paste / clear group"),
             ("Left click scene",         "Recall scene"),
-            ("Right double-click scene", "Edit scene name and colour"),
+            ("Right-click / Ctrl+click scene", "Open scene context panel"),
+            ("Click S button",               "Cycle: off / solo (amber) / locked (red)"),
             ("Ctrl+drag scene",          "Reorder scene buttons"),
             ("Double-click fader value", "Type value directly"),
             ("Cmd+S (fixture editor)",   "Save fixture definition"),
@@ -514,19 +536,19 @@ def build_quick_ref(path):
 
     left_data = (
         qr_section("SCENES", [
-            ("Left click",         "Recall scene"),
-            ("Right dbl-click",    "Edit name / colour"),
-            ("Ctrl+drag",          "Reorder"),
-            ("REC",                "Record (warns if solos active)"),
-            ("CLR",                "Clear scene"),
-            ("Fade (s)",           "Set fade time"),
-            ("STOP FADE",          "Interrupt running fade"),
+            ("Left click",            "Recall scene"),
+            ("Right-click/Ctrl+click","Open scene panel"),
+            ("Ctrl+drag",             "Reorder"),
+            ("STOP FADE",             "Interrupt running fade"),
+            ("Gold",                  "Last recalled"),
+            ("Blue",                  "Panel open"),
         ]) +
-        qr_section("SOLOS & RECORD", [
-            ("S button",           "Solo a channel"),
-            ("Solo fix",           "Solo whole fixture + light S"),
-            ("REC with solos",     "Partial scene record"),
-            ("CLEAR SOLOS",        "Clear all solos"),
+        qr_section("SOLOS & LOCKS", [
+            ("S — amber",          "Solo channel"),
+            ("S — red",            "Lock (exclude from recall)"),
+            ("Solo fix",           "Cycle all channels"),
+            ("CLEAR SOLOS",        "Clear amber solos"),
+            ("CLEAR LOCKS",        "Clear red locks"),
         ]) +
         qr_section("COPY & PASTE", [
             ("Ctrl+click",         "Copy fixture state"),
