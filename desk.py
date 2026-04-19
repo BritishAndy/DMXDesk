@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 98
+BUILD   = 99
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -4333,17 +4333,41 @@ def build_ui(patch: list, patch_path: Path = None):
         stop_fade_btn._active_bg = "#444444"
         stop_fade_btn._active_fg = "#555555"
 
+    _last_recalled = {"slot": None, "snapshot": {}}
+
+    def _scene_matches_current(slot):
+        """True if current fixture states match the scene — no need to recall."""
+        if _last_recalled["slot"] != slot: return False
+        scene = scenes.get(slot, {})
+        fixture_states = scene.get("fixtures", {})
+        by_name = {fw.name: fw for fw in all_widgets}
+        for name, target in fixture_states.items():
+            if name not in by_name or not target: continue
+            fw = by_name[name]
+            if not hasattr(fw, "get_state"): continue
+            current = fw.get_state()
+            for k, v in target.items():
+                if v is None: continue
+                if current.get(k) != v and current.get(int(k)) != v:
+                    return False
+        return True
+
     def _do_go(slot):
         if _scene_fade_active[0]: return
         _select_slot(slot)
         if slot not in scenes:
             return  # empty slot — nothing to recall
+        # Skip if this scene is already active and nothing has changed
+        if _scene_matches_current(slot):
+            return
         fade_var.set(str(scenes[slot].get("fade", 0.0)))
         _scene_fade_stop[0] = False
         _set_scene_buttons_state(tk.DISABLED)
         def _on_done():
             if not _scene_fade_stop[0]:
                 _set_scene_buttons_state(tk.NORMAL)
+            # Snapshot state after recall completes
+            _last_recalled["slot"] = slot
         recall_scene(slot, all_widgets, root, on_complete=_on_done, stop_flag=_scene_fade_stop)
 
     def _do_clear_solos():
