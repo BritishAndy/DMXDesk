@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 99
+BUILD   = 109
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -1402,6 +1402,230 @@ class DMXGridWidget(tk.Frame):
     def illuminate_solos_from_state(self, state): pass
     def apply_gm(self, gm):                       pass
 
+# ── TimingLoggerWidget ────────────────────────────────────────────────────────
+
+class TimingLoggerWidget(tk.Frame):
+    """
+    Standalone cue timing logger. Records the wall time, slot number,
+    scene name and elapsed time for each scene recall.
+    Add to patch.json:  {"type": "timinglogger", "name": "Timing Logger", "row": 1}
+    """
+
+    BG       = "#1a1a2b"
+    FG_DIM   = "#556677"
+    FG_GOLD  = "#ffcc00"
+    FG_AMBER = "#ffaa00"
+    FG_GREEN = "#aaffaa"
+    FG_RED   = "#ff4444"
+    FG_LOG   = "#aaaacc"
+
+    def __init__(self, parent, name="Timing Logger", sz=None, **kwargs):
+        super().__init__(parent, **kwargs)
+        self.name = name
+        sz = sz or DEFAULT_SIZES
+        self.configure(relief=tk.RIDGE, bd=2, padx=6, pady=6, bg=self.BG)
+
+        class _NoSolo:
+            soloed = False
+            def reset(self): pass
+        self.fixture_solo = _NoSolo()
+        self._ch_solos    = {}
+
+        fnt_big = ("Courier", max(10, int(12 * (sz["master_h"] / 160))), "bold")
+        fnt_med = ("Courier", max(8,  int(10 * (sz["master_h"] / 160))))
+        fnt_lbl = ("Helvetica", sz["btn_font"])
+
+        # Title
+        tk.Label(self, text=name.upper(), bg=self.BG, fg=self.FG_DIM,
+                 font=fnt_lbl).pack(pady=(2, 4))
+
+        # Status / elapsed display
+        self._status_var = tk.StringVar(value="Press TIMING to start")
+        tk.Label(self, textvariable=self._status_var,
+                 bg=self.BG, fg=self.FG_DIM,
+                 font=fnt_med, anchor="w").pack(fill=tk.X, pady=(0, 4))
+
+        # Buttons
+        btn_row = tk.Frame(self, bg=self.BG)
+        btn_row.pack(fill=tk.X, pady=(0, 4))
+        self._timing_btn = MacButton(btn_row, text="START",
+                                     bg="#224422", fg="#aaffaa",
+                                     font=fnt_lbl, padx=6, pady=3,
+                                     command=self._toggle)
+        self._timing_btn.pack(side=tk.LEFT, padx=(0, 3))
+        MacButton(btn_row, text="EXPORT", bg="#222244", fg="#aaddff",
+                  font=fnt_lbl, padx=6, pady=3,
+                  command=self._export).pack(side=tk.LEFT, padx=(0, 3))
+        MacButton(btn_row, text="RST", bg="#332222", fg="#ff8888",
+                  font=fnt_lbl, padx=4, pady=3,
+                  command=self._clear).pack(side=tk.LEFT)
+
+        # Column headers
+        hdr = tk.Frame(self, bg="#111122")
+        hdr.pack(fill=tk.X, pady=(0, 1))
+        for text, width, anchor in [
+            ("Elapsed",   8, "w"),
+            ("Sl", 3, "center"),
+            ("Scene Name", 0, "w"),
+        ]:
+            tk.Label(hdr, text=text, bg="#111122", fg=self.FG_DIM,
+                     font=("Helvetica", max(6, sz["btn_font"] - 1)),
+                     width=width, anchor=anchor).pack(side=tk.LEFT, padx=2)
+
+        # Log text box — tall for visibility
+        self._log = tk.Text(self, height=14, width=28,
+                            bg="#111122", fg=self.FG_LOG,
+                            font=("Courier", max(8, int(9 * (sz["master_h"] / 160)))),
+                            relief=tk.FLAT, state=tk.DISABLED,
+                            cursor="arrow", selectbackground="#333366")
+        self._log.pack(fill=tk.BOTH, expand=True, pady=(0, 2))
+
+        # Entry count
+        self._count_var = tk.StringVar(value="0 cues")
+        tk.Label(self, textvariable=self._count_var,
+                 bg=self.BG, fg=self.FG_DIM,
+                 font=("Helvetica", max(6, sz["btn_font"] - 1)),
+                 anchor="e").pack(fill=tk.X)
+
+        # State
+        self._active     = False
+        self._start_t    = None
+        self._entries    = []
+
+    # ── Controls ──────────────────────────────────────────────────────────────
+
+    def _toggle(self):
+        if not self._active:
+            # If there are existing entries, confirm restart
+            if self._entries:
+                from tkinter import messagebox as _mb
+                if not _mb.askyesno("Restart Timing",
+                        f"{len(self._entries)} cues already logged.\n\n"
+                        "Start a new session? (Current log will be cleared)"):
+                    return
+                self._clear_silent()
+            self._active  = True
+            self._start_t = None
+            self._timing_btn.config(bg="#442200", fg=self.FG_AMBER,
+                                    text="■ STOP")
+            self._status_var.set("Waiting…")
+
+        else:
+            self._active  = False
+            self._timing_btn.config(bg="#224422", fg="#aaffaa",
+                                    text="START")
+            self._status_var.set(f"Paused — {len(self._entries)} cues")
+
+
+    def log_scene(self, slot: int, name: str):
+        """Called by _do_go on every scene recall when active."""
+        if not self._active:
+            return
+        import time as _t, datetime as _dt
+        now_t  = _t.time()
+        now_dt = _dt.datetime.now()
+        if self._start_t is None:
+            self._start_t = now_t
+        elapsed = now_t - self._start_t
+        h = int(elapsed // 3600)
+        m = int((elapsed % 3600) // 60)
+        s = int(elapsed % 60)
+        elapsed_str = f"{h:02d}:{m:02d}:{s:02d}"
+        wall_str    = now_dt.strftime("%d-%m-%y %H:%M")
+        self._entries.append({
+            "wall": wall_str, "slot": slot,
+            "name": name,     "elapsed": elapsed_str,
+        })
+        # Update status
+        self._status_var.set(f"Last: {elapsed_str}  Slot {slot:>2}")
+        self._count_var.set(f"{len(self._entries)} cues")
+        # Append to log
+        line = f"{elapsed_str}  {slot:>2}  {name[:18]}"
+        self._log.config(state=tk.NORMAL)
+        self._log.insert(tk.END, line + "\n")
+        self._log.see(tk.END)
+        self._log.config(state=tk.DISABLED)
+
+    def _export(self):
+        from tkinter import filedialog
+        import datetime as _dt, csv
+        if not self._entries:
+            self._status_var.set("Nothing to export")
+            return
+        default = _dt.datetime.now().strftime("timing_%d%m%y_%H%M.csv")
+        path = filedialog.asksaveasfilename(
+            title="Export timing log",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=default)
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="") as f:
+                w = csv.writer(f)
+                w.writerow(["Date/Time", "Slot", "Scene Name", "Elapsed"])
+                for e in self._entries:
+                    w.writerow([e["wall"], e["slot"], e["name"], e["elapsed"]])
+            self._status_var.set(f"Exported {len(self._entries)} cues")
+        except Exception as ex:
+            self._status_var.set(f"Export failed: {ex}")
+
+    def _clear_silent(self):
+        """Clear without prompting — used internally."""
+        self._entries  = []
+        self._start_t  = None
+        self._log.config(state=tk.NORMAL)
+        self._log.delete("1.0", tk.END)
+        self._log.config(state=tk.DISABLED)
+        self._count_var.set("0 cues")
+
+    def _clear(self):
+        if self._entries:
+            from tkinter import messagebox as _mb
+            if not _mb.askyesno("Clear Log",
+                    f"Clear {len(self._entries)} logged cues?"):
+                return
+        self._clear_silent()
+        self._active = False
+        self._timing_btn.config(bg="#224422", fg="#aaffaa", text="START")
+        self.configure(highlightbackground=self.BG)
+        self._status_var.set("Log cleared")
+
+    def get_timing_state(self) -> dict:
+        return {
+            "active":  self._active,
+            "start_t": self._start_t,
+            "entries": list(self._entries),
+        }
+
+    def restore_timing_state(self, state: dict):
+        self._active  = state.get("active",  False)
+        self._start_t = state.get("start_t", None)
+        self._entries = state.get("entries", [])
+        self._log.config(state=tk.NORMAL)
+        self._log.delete("1.0", tk.END)
+        for e in self._entries:
+            line = e["elapsed"] + "  " + f"{e['slot']:>2}" + "  " + e["name"][:18]
+            self._log.insert(tk.END, line + "\n")
+        self._log.config(state=tk.DISABLED)
+        self._count_var.set(f"{len(self._entries)} cues")
+        if self._active:
+            self._timing_btn.config(bg="#442200", fg=self.FG_AMBER,
+                                    text="■ STOP")
+            self._status_var.set(
+                f"{len(self._entries)} cues logged" if self._entries
+                else "Waiting…")
+
+
+    # ── Compatibility stubs ───────────────────────────────────────────────────
+    def is_soloed(self):                          return False
+    def get_state(self):                          return {}
+    def get_soloed_state(self):                   return {}
+    def set_state(self, state):                   pass
+    def illuminate_solos_from_state(self, state): pass
+    def apply_gm(self, gm):                       pass
+
+
 # ── ClockWidget ────────────────────────────────────────────────────────────────
 
 class ClockWidget(tk.Frame):
@@ -1488,8 +1712,8 @@ class ClockWidget(tk.Frame):
         self._cd_entry.pack(side=tk.LEFT, padx=4)
         cd_btns = tk.Frame(self, bg=self.BG)
         cd_btns.pack(pady=(2, 0))
-        self._cd_start_btn = MacButton(cd_btns, text="START", bg="#443322",
-                                       fg=self.FG_CD, font=fnt_lbl,
+        self._cd_start_btn = MacButton(cd_btns, text="START", bg="#224422",
+                                       fg=self.FG_SW, font=fnt_lbl,
                                        width=5, padx=6, pady=2, command=self._cd_startstop)
         self._cd_start_btn.pack(side=tk.LEFT, padx=2)
         MacButton(cd_btns, text="RST", bg="#332222", fg="#ff8888",
@@ -1605,7 +1829,7 @@ class ClockWidget(tk.Frame):
             self._cd_running = True
             self._cd_alert   = False
             self._cd_lbl.config(fg=self.FG_CD)
-            self._cd_start_btn.config(text="STOP", bg="#664422")
+            self._cd_start_btn.config(text="STOP", bg="#442222")
 
     def _cd_reset(self):
         self._cd_running    = False
@@ -1623,13 +1847,13 @@ class ClockWidget(tk.Frame):
         sw_elapsed = self._sw_elapsed + (_t.time() - self._sw_start_t if self._sw_running else 0)
         cd_remaining = max(0.0, self._cd_remaining - (_t.time() - self._cd_start_t if self._cd_running else 0))
         return {
-            "sw_elapsed":   sw_elapsed,
-            "sw_running":   self._sw_running,
-            "sw_laps":      list(self._sw_laps),
-            "cd_remaining": cd_remaining,
-            "cd_running":   self._cd_running,
-            "cd_expired":   self._cd_expired,
-            "cd_entry":     self._cd_entry.get(),
+            "sw_elapsed":      sw_elapsed,
+            "sw_running":      self._sw_running,
+            "sw_laps":         list(self._sw_laps),
+            "cd_remaining":    cd_remaining,
+            "cd_running":      self._cd_running,
+            "cd_expired":      self._cd_expired,
+            "cd_entry":        self._cd_entry.get(),
         }
 
     def restore_clock_state(self, state: dict):
@@ -1656,9 +1880,11 @@ class ClockWidget(tk.Frame):
         self._cd_entry.delete(0, tk.END)
         self._cd_entry.insert(0, entry_val)
         if self._cd_running:
-            self._cd_start_btn.config(text="STOP", bg="#664422")
+            self._cd_start_btn.config(text="STOP", bg="#442222")
         if self._cd_expired:
             self._cd_flash_tick = 0
+
+
 
     def is_soloed(self):                          return False
     def get_state(self):                          return {}
@@ -2365,7 +2591,8 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
     sbtn("＋ Add Sub",       "#223333", "#44ffdd",  lambda: _add_row("submaster"))
     sbtn("＋ Add Divider",   "#222244", "#8888ff",  lambda: _add_row("divider"))
     sbtn("＋ Add Clock",     "#332233", "#cc88ff",  lambda: _add_row("clock"))
-    sbtn("＋ Add DMX Grid",  "#222233", "#88ccff",  lambda: _add_row("dmxgrid"), sep_after=True)
+    sbtn("＋ Add DMX Grid",      "#222233", "#88ccff",  lambda: _add_row("dmxgrid"))
+    sbtn("＋ Add Timing Logger", "#222233", "#cc88ff",  lambda: _add_row("timinglogger"), sep_after=True)
     sbtn("▲ Up",             "#2a2a2a", FGA,        lambda: _move_up())
     sbtn("▼ Down",           "#2a2a2a", FGA,        lambda: _move_down(), sep_after=True)
     sbtn("✕ Delete",         "#442222", "#ff8888",  lambda: _delete_row())
@@ -2526,6 +2753,8 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
             new_row["name"] = "DMX Grid"
         elif ftype == "clock":
             new_row["name"] = "Clock"
+        elif ftype == "timinglogger":
+            new_row["name"] = "Timing Logger"
         elif ftype != "divider":
             new_row["name"] = "New Fixture"
             new_row["address"] = max_addr
@@ -2650,7 +2879,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
 
         def _on_type_change(*_):
             t = type_var.get().lower()
-            is_fixture   = t not in ("divider", "clock", "submaster", "dmxgrid")
+            is_fixture   = t not in ("divider", "clock", "submaster", "dmxgrid", "timinglogger")
             is_submaster = t == "submaster"
             is_named     = t not in ("divider", "clock")
             name_e.configure(state="normal" if is_named else "disabled")
@@ -2720,7 +2949,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         addr_map = {}
         for i, r in enumerate(rows):
             ftype = r.get("type","").lower()
-            if ftype in ("divider","clock","dmxgrid"): continue
+            if ftype in ("divider","clock","dmxgrid","timinglogger"): continue
             if not r.get("name"):
                 errors.append(f"Row {i+1}: missing name")
             if ftype == "submaster":
@@ -3690,7 +3919,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
 
     regular_defs   = [(f, load_fixture_def(f["type"])) for f in patch
-                      if f.get("type", "").lower() not in ("submaster", "divider", "clock", "dmxgrid")]
+                      if f.get("type", "").lower() not in ("submaster", "divider", "clock", "dmxgrid", "timinglogger")]
     submaster_defs = [f for f in patch if f.get("type", "").lower() == "submaster"]
     # Dividers are rendered inline during rebuild — extract with row info
     divider_entries = [f for f in patch if f.get("type", "").lower() == "divider"]
@@ -3733,7 +3962,10 @@ def build_ui(patch: list, patch_path: Path = None):
         states      = [fw.get_state() for fw in all_widgets]
         solo_states = []
         # Save clock states keyed by name
-        clock_states = {cw.name: cw.get_clock_state() for cw in clock_widgets}
+        clock_states  = {cw.name: cw.get_clock_state()
+                         for cw in clock_widgets if isinstance(cw, ClockWidget)}
+        timing_states = {cw.name: cw.get_timing_state()
+                         for cw in clock_widgets if isinstance(cw, TimingLoggerWidget)}
         for fw in all_widgets:
             if isinstance(fw, DigitalFixture):
                 solo_states.append({
@@ -3806,6 +4038,15 @@ def build_ui(patch: list, patch_path: Path = None):
                                   channel_names=_ch_names)
                 w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
                 # DMXGridWidget is not a DMX fixture — don't add to fixture_widgets
+            elif ftype == "timinglogger":
+                parent = row_bot if f.get("row", 1) == 2 else row_top
+                tname = f.get("name", "Timing Logger")
+                w = TimingLoggerWidget(parent, name=tname, sz=sz)
+                w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
+                if tname in timing_states:
+                    w.restore_timing_state(timing_states[tname])
+                clock_widgets.append(w)
+                # TimingLoggerWidget is not a DMX fixture
             elif ftype not in ("submaster",):
                 try:
                     f2, defn = next(reg_iter)
@@ -4361,6 +4602,12 @@ def build_ui(patch: list, patch_path: Path = None):
         if _scene_matches_current(slot):
             return
         fade_var.set(str(scenes[slot].get("fade", 0.0)))
+        # Fire timing log on all active clock widgets
+        slot_name = scene_names.get(slot, f"Scene {slot}")
+        for _cw in clock_widgets:
+            if hasattr(_cw, "log_scene"):
+                _cw.log_scene(slot, slot_name)
+
         _scene_fade_stop[0] = False
         _set_scene_buttons_state(tk.DISABLED)
         def _on_done():
@@ -4638,6 +4885,24 @@ def build_ui(patch: list, patch_path: Path = None):
         root.after(_dmx_interval_ms, dmx_loop)
     root.after(500, dmx_loop)
     def _on_close():
+        # Check for active timing loggers with data
+        active_logs = [w for w in clock_widgets
+                       if isinstance(w, TimingLoggerWidget) and w._entries]
+        if active_logs:
+            total = sum(len(w._entries) for w in active_logs)
+            from tkinter import messagebox as _mb
+            answer = _mb.askyesnocancel(
+                "Close DMX Desk",
+                f"You have {total} unsaved timing log "
+                f"{'entry' if total == 1 else 'entries'}.\n\n"
+                "Export before closing?",
+                parent=root)
+            if answer is None:
+                return   # Cancel — don't close
+            if answer:
+                for w in active_logs:
+                    w._export()
+                    return   # Let user export then decide
         if not dry_run:
             send_defaults(patch)
         root.destroy()

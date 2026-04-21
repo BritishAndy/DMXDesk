@@ -114,15 +114,16 @@ def build_full_manual(path):
             ("10. Copy & Paste",          "Copying fixture states"),
             ("11. Group Selection",       "Ganging fixtures together"),
             ("12. Clock & Timers",        "Clock, stopwatch, countdown"),
-            ("13. DMX Grid",              "Live DMX output monitor in the fixture panel"),
-            ("14. Patch Editor",          "Managing the fixture patch"),
-            ("15. Fixture Definitions",   "JSON fixture files explained"),
-            ("16. Open Fixture Library",  "Importing fixtures from OFL"),
-            ("17. Settings",              "Art-Net, appearance, behaviour, OSC"),
-            ("18. Save & Load",           "Saving shows and patches"),
-            ("19. QLab Integration",      "OSC control from QLab"),
-            ("20. Monitoring Tools",       "monitor_gui.py and monitor.py"),
-            ("21. Keyboard & Mouse",      "Quick reference"),
+            ("13. Timing Logger",          "Scene cue timing and CSV export"),
+            ("14. DMX Grid",              "Live DMX output monitor in the fixture panel"),
+            ("15. Patch Editor",          "Managing the fixture patch"),
+            ("16. Fixture Definitions",   "JSON fixture files explained"),
+            ("17. Open Fixture Library",  "Importing fixtures from OFL"),
+            ("18. Settings",              "Art-Net, appearance, behaviour, OSC"),
+            ("19. Save & Load",           "Saving shows and patches"),
+            ("20. QLab Integration",      "OSC control from QLab"),
+            ("21. Monitoring Tools",       "monitor_gui.py and monitor.py"),
+            ("22. Keyboard & Mouse",      "Quick reference"),
         ], col_widths=[60*mm, 105*mm]),
         PageBreak(),
     ]
@@ -312,7 +313,36 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("13. DMX Grid"),
+        section_title("13. Timing Logger"),
+        p("The Timing Logger records the time of each scene recall during a show or rehearsal, "
+          "allowing you to annotate your script with accurate cue timings. "
+          "Add it to your patch as a standalone widget:"),
+        p('  {"type": "timinglogger", "name": "Timing Logger", "row": 1}', 'kbd'),
+        sp(2),
+        sub("Controls"),
+        key_table([
+            ("START",      "Begin logging. First scene press becomes time 00:00:00."),
+            ("STOP",       "Pause logging without clearing the log."),
+            ("EXPORT",     "Save the log as a CSV file."),
+            ("RST",        "Clear the log (confirms if entries exist)."),
+        ]),
+        sp(2),
+        sub("Log display"),
+        p("Each scene recall is shown as a row: elapsed time, slot number, and scene name. "
+          "The log scrolls automatically as entries accumulate."),
+        sp(2),
+        sub("CSV format"),
+        p("Exported CSV contains: Date/Time, Slot, Scene Name, Elapsed time."),
+        p('  30-04-26 19:32, 5, "Act 1 Scene 1", 00:00:00', 'kbd'),
+        p('  30-04-26 19:35, 7, "Act 1 Scene 2", 00:03:02', 'kbd'),
+        sp(2),
+        sub("On close"),
+        p("If the app is closed with unsaved timing entries, a dialog offers to export "
+          "before closing.", 'note'),
+    ]
+
+    story += [
+        section_title("14. DMX Grid"),
         p("The DMX Grid is an optional panel that can be added to the fixture area. "
           "It shows all 512 DMX output channels as a compact 32x16 grid, "
           "reading directly from the desk output — no network monitoring needed."),
@@ -337,7 +367,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("14. Patch Editor"),
+        section_title("15. Patch Editor"),
         sub("Selecting"),
         key_table([
             ("Single-click",   "Select row."),
@@ -351,6 +381,7 @@ def build_full_manual(path):
             ("+ Add Divider",    "Visual separator."),
             ("+ Add Clock",      "Clock/timer widget."),
             ("+ Add DMX Grid",   "Live DMX output grid monitor."),
+            ("+ Add Timing Logger", "Cue timing logger with CSV export."),
         ]),
         sp(2), sub("Other"),
         key_table([
@@ -364,7 +395,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("15. Fixture Definitions"),
+        section_title("16. Fixture Definitions"),
         sub("Channel Fields"),
         key_table([
             ("label",   "Channel name. R/G/B/W/A/UV for colour channels."),
@@ -382,7 +413,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("16. Open Fixture Library"),
+        section_title("17. Open Fixture Library"),
         key_table([
             ("First use",    "Fetches index from GitHub. Cached in ofl_fixtures.json."),
             ("Manufacturer", "Filter by manufacturer (e.g. chauvet, robe)."),
@@ -393,7 +424,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("17. Settings"),
+        section_title("18. Settings"),
         sub("Art-Net"),
         key_table([
             ("Target IP", "IP address of your Art-Net node."),
@@ -419,7 +450,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("18. Save & Load"),
+        section_title("19. Save & Load"),
         sub("Show Files"),
         p("Scenes save automatically to the loaded show file on every change. "
           "The filename appears in the top bar. "
@@ -431,7 +462,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("19. QLab Integration"),
+        section_title("20. QLab Integration"),
         p("The desk receives OSC from QLab to recall scenes automatically. "
           "Art-Net HTP merge at the node allows both to send simultaneously."),
         sp(2), sub("QLab Setup"),
@@ -455,7 +486,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("20. Monitoring Tools"),
+        section_title("21. Monitoring Tools"),
         sub("monitor_gui.py — GUI Monitor (recommended)"),
         p("A tkinter companion application for testing and diagnosing DMX output. "
           "Run alongside desk.py on the same machine or any Mac on the same network."),
@@ -485,7 +516,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("21. Keyboard & Mouse"),
+        section_title("22. Keyboard & Mouse"),
         key_table([
             ("Ctrl+click fixture",       "Copy fixture state"),
             ("Click green fixture",      "Paste copied state"),
