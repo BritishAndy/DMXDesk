@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 109
+BUILD   = 130
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -1968,11 +1968,11 @@ def clear_scene(slot: int):
         del scenes[slot]; save_scenes_to_disk()
         print(f"Scene {slot} cleared.")
 
-def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag=None):
+def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag=None, fade_override=None):
     if slot not in scenes: return
     scene = scenes[slot]
     fixture_states = scene.get("fixtures", {})  # name → state dict
-    fade_time = scene.get("fade", 0.0)
+    fade_time = fade_override if fade_override is not None else scene.get("fade", 0.0)
 
     # Build a name→widget lookup
     by_name = {fw.name: fw for fw in all_widgets}
@@ -2013,12 +2013,17 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
 
     start_states = [(fw, fw.get_state(), _filter_locked(fw, state))
                      for fw, state in active_pairs if _filter_locked(fw, state)]
-    steps = max(1, int(fade_time * _fade_steps_sec))
-    interval = int(fade_time * 1000 / steps)
-    step_ref = [0]
+    import time as _time_mod
+    _fade_start = _time_mod.time()
+    _TICK_MS    = 25   # how often to update — wall clock drives actual progress
 
     def _fade_step():
-        t = min(1.0, step_ref[0] / steps)
+        if stop_flag and stop_flag[0]:
+            print(f"Scene {slot} fade interrupted.")
+            if on_complete: on_complete()
+            return
+        elapsed = _time_mod.time() - _fade_start
+        t       = min(1.0, elapsed / fade_time)
         for fw, start, target in start_states:
             if isinstance(fw, SubmasterWidget):
                 if "level" in target:
@@ -2038,14 +2043,10 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
                     interp[idx_str] = int(sval + (tval - sval) * t)
                 fw.set_state(interp)
         if not dry_run: send_dmx()
-        step_ref[0] += 1
-        if step_ref[0] <= steps and not (stop_flag and stop_flag[0]):
-            root.after(interval, _fade_step)
+        if t < 1.0:
+            root.after(_TICK_MS, _fade_step)
         else:
-            if not (stop_flag and stop_flag[0]):
-                print(f"Scene {slot} recalled (fade: {fade_time}s).")
-            else:
-                print(f"Scene {slot} fade interrupted.")
+            print(f"Scene {slot} recalled (fade: {fade_time}s).")
             if on_complete: on_complete()
 
     _fade_step()
@@ -2592,7 +2593,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
     sbtn("＋ Add Divider",   "#222244", "#8888ff",  lambda: _add_row("divider"))
     sbtn("＋ Add Clock",     "#332233", "#cc88ff",  lambda: _add_row("clock"))
     sbtn("＋ Add DMX Grid",      "#222233", "#88ccff",  lambda: _add_row("dmxgrid"))
-    sbtn("＋ Add Timing Logger", "#222233", "#cc88ff",  lambda: _add_row("timinglogger"), sep_after=True)
+    sbtn("＋ Add Timing Logger", "#222233", "#cc88ff",  lambda: _add_row("timinglogger"))
     sbtn("▲ Up",             "#2a2a2a", FGA,        lambda: _move_up())
     sbtn("▼ Down",           "#2a2a2a", FGA,        lambda: _move_down(), sep_after=True)
     sbtn("✕ Delete",         "#442222", "#ff8888",  lambda: _delete_row())
@@ -2850,7 +2851,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         # Row
         row_var = tk.StringVar(value=str(r.get("row", 1)))
         lrow("Row (1 or 2):", lambda p: ttk.Combobox(p, textvariable=row_var,
-              values=["1","2"], state="readonly", font=fnt_s), 4)
+              values=["1","2"], state="readonly", font=fnt_s), 5)
 
         # Colour
         colour_var = tk.StringVar(value=r.get("colour",""))
@@ -3925,7 +3926,8 @@ def build_ui(patch: list, patch_path: Path = None):
     divider_entries = [f for f in patch if f.get("type", "").lower() == "divider"]
 
     all_widgets   = []
-    clock_widgets  = []  # ClockWidgets tracked separately
+    clock_widgets    = []
+    sequence_widgets = []  # ClockWidgets tracked separately
 
     def _reload_patch():
         """Re-read patch.json and rebuild the entire fixture panel."""
@@ -3942,7 +3944,7 @@ def build_ui(patch: list, patch_path: Path = None):
         patch.clear()
         patch.extend(new_patch)
         new_regular = []
-        skip_types = ("submaster", "divider", "clock", "dmxgrid")
+        skip_types = ("submaster", "divider", "clock", "dmxgrid", "timinglogger")
         for fi in new_patch:
             ftype = fi.get("type", "").lower()
             if ftype in skip_types:
@@ -4047,6 +4049,7 @@ def build_ui(patch: list, patch_path: Path = None):
                     w.restore_timing_state(timing_states[tname])
                 clock_widgets.append(w)
                 # TimingLoggerWidget is not a DMX fixture
+
             elif ftype not in ("submaster",):
                 try:
                     f2, defn = next(reg_iter)
@@ -4127,9 +4130,13 @@ def build_ui(patch: list, patch_path: Path = None):
     _context_slot = [None]   # slot currently open in context panel
     go_buttons = {}
 
+    def _is_seq(s):
+        return s in scenes and "sequence" in scenes[s]
+
     def _slot_bg(s):
         if s == _context_slot[0]:    return "#003366"   # blue — context panel open
         if s == selected_slot.get(): return "#cc8800"   # gold — last recalled
+        if _is_seq(s):               return "#003333"   # teal — sequence slot
         if s in scene_colours:
             try:
                 c = scene_colours[s].lstrip("#")
@@ -4140,9 +4147,11 @@ def build_ui(patch: list, patch_path: Path = None):
             except Exception:
                 pass
         return "#1a4a1a" if s in scenes else "#333333"
+
     def _slot_fg(s):
-        if s == _context_slot[0]:    return "#88ccff"   # blue text for context
-        if s == selected_slot.get(): return "#000000"   # black on gold
+        if s == _context_slot[0]:    return "#88ccff"
+        if s == selected_slot.get(): return "#000000"
+        if _is_seq(s):               return "#44ffee"   # teal text for sequences
         return "#ffffff" if s in scenes else "#aaaaaa"
 
     def _rebuild_scene_buttons():
@@ -4162,6 +4171,204 @@ def build_ui(patch: list, patch_path: Path = None):
                      text=scene_names.get(s, f"Scene {s}"))
 
     def _select_slot(s): selected_slot.set(s); _refresh_buttons()
+
+    def _edit_sequence_slot(slot):
+        """Dialog to create/edit a sequence stored in a scene slot."""
+        win = tk.Toplevel(root)
+        win.title(f"Edit Sequence — Slot {slot}")
+        win.configure(bg="#1a1a1a")
+        win.resizable(True, True)
+        win.minsize(380, 420)
+
+        # Restore saved geometry
+        try:
+            import json as _json
+            with open(PREFS_FILE, "r") as _f:
+                _p = _json.load(_f)
+            win.geometry(_p.get("seq_editor_geometry", "420x560"))
+        except Exception:
+            win.geometry("420x560")
+
+        def _on_close():
+            try:
+                # Save geometry to prefs file directly
+                geo = win.geometry()
+                import json as _json
+                try:
+                    with open(PREFS_FILE, "r") as _f:
+                        _p = _json.load(_f)
+                except Exception:
+                    _p = {}
+                _p["seq_editor_geometry"] = geo
+                with open(PREFS_FILE, "w") as _f:
+                    _json.dump(_p, _f)
+            except Exception:
+                pass
+            win.grab_release()
+            win.destroy()
+
+        win.grab_set()
+        win.protocol("WM_DELETE_WINDOW", _on_close)
+
+        existing = scenes.get(slot, {})
+        steps    = list(existing.get("sequence", []))
+        sname    = existing.get("name", f"Sequence {slot}")
+
+        # Use grid for reliable button visibility
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(4, weight=1)   # steps row expands
+
+        tk.Label(win, text=f"Sequence — Slot {slot}",
+                 bg="#1a1a1a", fg="#ffcc00",
+                 font=("Helvetica", 12, "bold")).grid(
+                 row=0, column=0, pady=(10,4), padx=12, sticky="w")
+
+        # Name
+        name_row = tk.Frame(win, bg="#1a1a1a")
+        name_row.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
+        tk.Label(name_row, text="Name:", bg="#1a1a1a", fg="#aaaaaa",
+                 font=("Helvetica", 9), width=8, anchor="w").pack(side=tk.LEFT)
+        name_var = tk.StringVar(value=sname)
+        tk.Entry(name_row, textvariable=name_var, width=22,
+                 bg="#333333", fg="#ffcc00", insertbackground="#ffcc00",
+                 font=("Helvetica", 10), relief=tk.FLAT, bd=3).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Format help
+        help_frame = tk.Frame(win, bg="#111111", relief=tk.FLAT)
+        help_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0,4))
+        help_text = (
+            "Format:  [scene]  fade(s)  delay(s)  [+Fixture=val ...]\n"
+            "  5  2.0  0.5              — recall scene 5, 2s fade, 0.5s delay\n"
+            "  5  2.0  0.0  +House Lights=128  — scene + set fixture\n"
+            "  +House Lights=0  1.0  0.5  — channel only, no scene\n"
+            "  # comment line           — ignored"
+        )
+        tk.Label(help_frame, text=help_text,
+                 bg="#111111", fg="#556677",
+                 font=("Courier", 8), justify=tk.LEFT,
+                 anchor="w").pack(fill=tk.X, padx=6, pady=4)
+
+        tk.Label(win, text="Steps:",
+                 bg="#1a1a1a", fg="#aaaaaa",
+                 font=("Helvetica", 9)).grid(row=3, column=0, sticky="w", padx=12)
+
+        # Steps text box
+        def steps_to_text(steps):
+            lines = []
+            for s in steps:
+                parts = []
+                if "scene" in s:
+                    parts.append(str(s["scene"]))
+                parts.append(str(s.get("fade", 0.0)))
+                parts.append(str(s.get("delay", 0.0)))
+                for k, v in s.get("channels", {}).items():
+                    parts.append(f"+{k}={v}")
+                lines.append("  ".join(parts))
+            return "\n".join(lines)
+
+        def text_to_steps(text):
+            import re as _re
+            result = []
+            for line in text.strip().splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"): continue
+
+                # Extract all +name=val assignments first (name may contain spaces)
+                # Match +...=number where name is everything between + and last =number
+                ch_assigns = {}
+                # Remove channel assignments from line before parsing numeric fields
+                ch_pattern = _re.compile(r'\+([^=+]+)=(\d+(?:\.\d+)?)')
+                for m in ch_pattern.finditer(line):
+                    name = m.group(1).strip()
+                    val  = float(m.group(2))
+                    ch_assigns[name] = val
+                # Remove all +name=val tokens from line
+                clean = ch_pattern.sub("", line).strip()
+
+                # Parse remaining numeric fields: [scene] [fade] [delay]
+                tokens = clean.split()
+                step = {}
+                if tokens and tokens[0].lstrip("-").isdigit():
+                    step["scene"] = int(tokens[0])
+                    tokens = tokens[1:]
+                if tokens:
+                    try: step["fade"]  = float(tokens[0])
+                    except Exception: pass
+                if len(tokens) > 1:
+                    try: step["delay"] = float(tokens[1])
+                    except Exception: pass
+                if ch_assigns:
+                    step["channels"] = ch_assigns
+                if step:
+                    result.append(step)
+            return result
+
+        steps_container = tk.Frame(win, bg="#1a1a1a")
+        steps_container.grid(row=4, column=0, sticky="nsew", padx=12, pady=(2,4))
+        steps_container.columnconfigure(0, weight=1)
+        steps_container.rowconfigure(0, weight=1)
+        steps_scroll = tk.Scrollbar(steps_container)
+        steps_scroll.grid(row=0, column=1, sticky="ns")
+        steps_box = tk.Text(steps_container, height=7, width=28,
+                            bg="#222222", fg="#44ffee",
+                            insertbackground="#44ffee",
+                            font=("Courier", 10), relief=tk.FLAT, bd=3,
+                            yscrollcommand=steps_scroll.set)
+        steps_box.grid(row=0, column=0, sticky="nsew")
+        steps_scroll.config(command=steps_box.yview)
+        steps_box.insert("1.0", steps_to_text(steps))
+        tk.Label(win,
+                 text="One step per line: [scene]  fade  delay  [+Fixture=val ...]",
+                 bg="#1a1a1a", fg="#555555",
+                 font=("Helvetica", 8)).grid(row=5, column=0, sticky="w", padx=12)
+
+        # Scene name preview
+        preview_var = tk.StringVar(value="")
+        tk.Label(win, textvariable=preview_var,
+                 bg="#1a1a1a", fg="#44aa88",
+                 font=("Courier", 8), justify=tk.LEFT,
+                 height=4, anchor="nw").grid(
+                 row=6, column=0, sticky="w", padx=12, pady=(2,4))
+
+        def _update_preview(*_):
+            parsed = text_to_steps(steps_box.get("1.0", tk.END))
+            lines = []
+            for s in parsed[:6]:
+                if "scene" in s:
+                    sn = scenes.get(s["scene"], {}).get("name", f"Scene {s['scene']}")
+                    lines.append(f"  {s['scene']:>2}  {sn[:20]}")
+                else:
+                    chs = "  ".join(f"{k}={v}" for k,v in s.get("channels",{}).items())
+                    lines.append(f"  ch  {chs[:24]}")
+            if len(parsed) > 6:
+                lines.append(f"  … +{len(parsed)-6} more")
+            preview_var.set("\n".join(lines) if lines else "")
+        steps_box.bind("<KeyRelease>", _update_preview)
+        _update_preview()
+
+        def _save():
+            new_steps = text_to_steps(steps_box.get("1.0", tk.END))
+            name = name_var.get().strip() or f"Sequence {slot}"
+            if slot not in scenes:
+                scenes[slot] = {}
+            scenes[slot]["sequence"] = new_steps
+            scenes[slot]["name"]     = name
+            scene_names[slot]        = name
+            scenes[slot].pop("fixtures", None)
+            save_scenes_to_disk()
+            _refresh_buttons()
+            _on_close()
+
+        btn_row = tk.Frame(win, bg="#1a1a1a")
+        btn_row.grid(row=7, column=0, pady=(4, 12))
+        btn(btn_row, "💾 Save", bg="#225533", fg="#44ffee",
+            font=("Helvetica", 10, "bold"), padx=10, pady=5,
+            command=_save).pack(side=tk.LEFT, padx=6)
+        btn(btn_row, "Cancel", bg="#333333", fg="#888888",
+            font=("Helvetica", 9), padx=8, pady=5,
+            command=_on_close).pack(side=tk.LEFT, padx=6)
+
+        steps_box.focus_set()
 
     def _rename_slot(slot):
         if _scene_fade_active[0]: return
@@ -4344,7 +4551,7 @@ def build_ui(patch: list, patch_path: Path = None):
                 b._active_fg = _slot_fg(slot)
                 b._active_bg = _darken(_slot_bg(slot))
         # Light up stop button during fade, dim when idle
-        if state == tk.DISABLED:
+        if state == tk.DISABLED or _seq_running[0]:
             stop_fade_btn.config(bg="#663300", fg="#ff8800")
             stop_fade_btn._active_bg = "#884400"
             stop_fade_btn._active_fg = "#ffaa00"
@@ -4508,16 +4715,59 @@ def build_ui(patch: list, patch_path: Path = None):
             _apply_name_colour()
             _close_context()
 
-        btn(inner, "⏺  Record",  "#aa3300", "#ffffff",
-            font=("Helvetica", 10, "bold"), pady=4,
-            command=_do_panel_rec).pack(fill=tk.X, pady=(0,2))
-        btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
-            font=("Helvetica", 9), pady=3,
-            command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
-        if has_scene:
-            btn(inner, "✕  Clear scene", "#442222", "#ff8888",
+        def _do_edit_sequence():
+            _close_context()
+            _edit_sequence_slot(slot)
+
+        def _do_convert_to_scene():
+            if slot in scenes:
+                scenes[slot].pop("sequence", None)
+                save_scenes_to_disk()
+                _refresh_buttons()
+            _close_context()
+
+        is_seq = _is_seq(slot)
+
+        if is_seq:
+            # Sequence slot — show steps summary and edit button
+            steps = scenes[slot].get("sequence", [])
+            for i, step in enumerate(steps[:5]):
+                sn = scenes.get(step.get("scene",""), {}).get("name", f"Scene {step.get('scene','?')}")
+                tk.Label(inner, text=f"  {i+1}. {sn[:18]}  f:{step.get('fade',0)}s  d:{step.get('delay',0)}s",
+                         bg="#222222", fg="#44ffee",
+                         font=("Courier", 7), anchor="w").pack(fill=tk.X)
+            if len(steps) > 5:
+                tk.Label(inner, text=f"  … +{len(steps)-5} more",
+                         bg="#222222", fg="#446655",
+                         font=("Courier", 7), anchor="w").pack(fill=tk.X)
+            tk.Frame(inner, bg="#444444", height=1).pack(fill=tk.X, pady=(4,2))
+            btn(inner, "✎  Edit steps", "#223333", "#44ffee",
+                font=("Helvetica", 9), pady=3,
+                command=_do_edit_sequence).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
+                font=("Helvetica", 9), pady=3,
+                command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "↩  Convert to regular scene", "#333322", "#cccc88",
+                font=("Helvetica", 8), pady=2,
+                command=_do_convert_to_scene).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "✕  Clear", "#442222", "#ff8888",
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_clr).pack(fill=tk.X, pady=(0,2))
+        else:
+            btn(inner, "⏺  Record",  "#aa3300", "#ffffff",
+                font=("Helvetica", 10, "bold"), pady=4,
+                command=_do_panel_rec).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
+                font=("Helvetica", 9), pady=3,
+                command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "▶  Convert to sequence", "#223333", "#44ffee",
+                font=("Helvetica", 9), pady=3,
+                command=lambda: (_close_context(), _edit_sequence_slot(slot))).pack(fill=tk.X, pady=(0,2))
+            if has_scene:
+                btn(inner, "✕  Clear scene", "#442222", "#ff8888",
+                    font=("Helvetica", 9), pady=3,
+                    command=_do_panel_clr).pack(fill=tk.X, pady=(0,2))
+
         btn(inner, "✕  Close", "#333333", "#888888",
             font=("Helvetica", 8), pady=2,
             command=_close_context).pack(fill=tk.X, pady=(4,0))
@@ -4562,6 +4812,10 @@ def build_ui(patch: list, patch_path: Path = None):
 
 
     def _do_stop_fade():
+        # Stop sequence if running
+        if _seq_running[0]:
+            _stop_sequence()
+            return
         if not _scene_fade_active[0]: return
         _scene_fade_stop[0]   = True
         _scene_fade_active[0] = False
@@ -4574,7 +4828,10 @@ def build_ui(patch: list, patch_path: Path = None):
         stop_fade_btn._active_bg = "#444444"
         stop_fade_btn._active_fg = "#555555"
 
-    _last_recalled = {"slot": None, "snapshot": {}}
+    _last_recalled    = {"slot": None, "snapshot": {}}
+    _seq_running      = [False]
+    _seq_after_id     = [None]
+    _seq_stop_flag    = [False]
 
     def _scene_matches_current(slot):
         """True if current fixture states match the scene — no need to recall."""
@@ -4593,11 +4850,126 @@ def build_ui(patch: list, patch_path: Path = None):
                     return False
         return True
 
+    def _stop_sequence():
+        """Stop a running sequence, leaving faders where they are."""
+        if _seq_after_id[0]:
+            try: root.after_cancel(_seq_after_id[0])
+            except Exception: pass
+            _seq_after_id[0] = None
+        _seq_stop_flag[0] = True
+        _seq_running[0]   = False
+        _set_scene_buttons_state(tk.NORMAL)
+        _refresh_buttons()
+
+    def _run_sequence(slot):
+        """Run a sequence stored in scenes[slot]['sequence']."""
+        if slot not in scenes: return
+        steps = scenes[slot].get("sequence", [])
+        if not steps: return
+
+        _seq_running[0]   = True
+        _seq_stop_flag[0] = False
+        _set_scene_buttons_state(tk.DISABLED)
+        _select_slot(slot)
+        _refresh_buttons()
+
+        def _apply_step_channels(step, fade):
+            """Apply direct channel/fixture overrides from a sequence step."""
+            ch_vals = step.get("channels", {})
+            if not ch_vals: return
+            by_name = {fw.name: fw for fw in all_widgets}
+            for key, val in ch_vals.items():
+                val_0_1 = max(0.0, min(1.0, val / 255.0))
+                # Try fixture name match first
+                if key in by_name:
+                    fw = by_name[key]
+                    if hasattr(fw, "_master_idx") and fw._master_idx is not None:
+                        raw_val = int(val_0_1 * 255)
+                        state = {fw._master_idx: raw_val}
+                        if fade <= 0:
+                            fw.set_state(state)
+                        else:
+                            # Fade to value
+                            start = dict(fw.get_state())
+                            steps_n = max(1, int(fade * _fade_steps_sec))
+                            interval = int(fade * 1000 / steps_n)
+                            step_ref = [0]
+                            def _ch_fade(fw=fw, start=start, target=state,
+                                         steps_n=steps_n, interval=interval,
+                                         step_ref=step_ref):
+                                step_ref[0] += 1
+                                t = step_ref[0] / steps_n
+                                interp = {}
+                                for k in target:
+                                    s_v = start.get(k, 0)
+                                    e_v = target[k]
+                                    interp[k] = int(s_v + (e_v - s_v) * t)
+                                fw.set_state(interp)
+                                if step_ref[0] < steps_n and not _seq_stop_flag[0]:
+                                    root.after(interval, _ch_fade)
+                            _ch_fade()
+                # Try raw DMX channel (ch1, ch2, etc.)
+                elif key.lower().startswith("ch") and key[2:].isdigit():
+                    ch_idx = int(key[2:]) - 1
+                    if 0 <= ch_idx < 512:
+                        dmx_values[ch_idx] = int(val)
+
+        def _fire(idx):
+            if _seq_stop_flag[0] or idx >= len(steps):
+                _seq_running[0] = False
+                _set_scene_buttons_state(tk.NORMAL)
+                _refresh_buttons()
+                return
+
+            step      = steps[idx]
+            step_slot = step.get("scene")
+            fade      = step.get("fade", 0.0)
+            delay     = step.get("delay", 0.0)
+
+            def _after_fade(idx=idx, delay=delay):
+                """Called when fade completes — wait delay then fire next step."""
+                if _seq_stop_flag[0]: return
+                delay_ms = max(0, int(delay * 1000))
+                if delay_ms > 0:
+                    _seq_after_id[0] = root.after(delay_ms,
+                                                   lambda: _fire(idx + 1))
+                else:
+                    _fire(idx + 1)
+
+            if step_slot is not None and step_slot in scenes:
+                recall_scene(step_slot, all_widgets, root,
+                             fade_override=fade,
+                             on_complete=_after_fade,
+                             stop_flag=_seq_stop_flag)
+            else:
+                # No scene — apply channels then schedule next step
+                _apply_step_channels(step, fade)
+                # Wait for channel fade + delay
+                wait_ms = max(100, int((fade + delay) * 1000))
+                _seq_after_id[0] = root.after(wait_ms, lambda: _fire(idx + 1))
+                return
+
+            # Apply any direct channel overrides alongside scene
+            _apply_step_channels(step, fade)
+
+        _fire(0)
+
     def _do_go(slot):
         if _scene_fade_active[0]: return
+        # Stop any running sequence
+        if _seq_running[0]:
+            _stop_sequence()
         _select_slot(slot)
         if slot not in scenes:
             return  # empty slot — nothing to recall
+        # Run as sequence if slot has sequence steps
+        if "sequence" in scenes[slot]:
+            slot_name = scene_names.get(slot, f"Scene {slot}")
+            for _cw in clock_widgets:
+                if hasattr(_cw, "log_scene"):
+                    _cw.log_scene(slot, slot_name)
+            _run_sequence(slot)
+            return
         # Skip if this scene is already active and nothing has changed
         if _scene_matches_current(slot):
             return
@@ -4613,7 +4985,6 @@ def build_ui(patch: list, patch_path: Path = None):
         def _on_done():
             if not _scene_fade_stop[0]:
                 _set_scene_buttons_state(tk.NORMAL)
-            # Snapshot state after recall completes
             _last_recalled["slot"] = slot
         recall_scene(slot, all_widgets, root, on_complete=_on_done, stop_flag=_scene_fade_stop)
 

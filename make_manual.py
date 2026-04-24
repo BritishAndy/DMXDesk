@@ -121,9 +121,9 @@ def build_full_manual(path):
             ("17. Open Fixture Library",  "Importing fixtures from OFL"),
             ("18. Settings",              "Art-Net, appearance, behaviour, OSC"),
             ("19. Save & Load",           "Saving shows and patches"),
-            ("20. QLab Integration",      "OSC control from QLab"),
-            ("21. Monitoring Tools",       "monitor_gui.py and monitor.py"),
-            ("22. Keyboard & Mouse",      "Quick reference"),
+            ("21. QLab Integration",      "OSC control from QLab"),
+            ("22. Monitoring Tools",       "monitor_gui.py and monitor.py"),
+            ("23. Keyboard & Mouse",      "Quick reference"),
         ], col_widths=[60*mm, 105*mm]),
         PageBreak(),
     ]
@@ -462,7 +462,53 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("20. QLab Integration"),
+        section_title("20. Sequences"),
+        p("A sequence is a scene slot that automatically fires a series of scene recalls "
+          "with per-step fade times and delays. Sequences appear as teal-coloured scene "
+          "buttons and are triggered identically to regular scenes — by left-click, "
+          "OSC, or the scene Go button."),
+        sp(2),
+        sub("Creating a Sequence"),
+        p("Right-click any scene button and choose <b>▶ Convert to sequence</b>, "
+          "or right-click an existing sequence and choose <b>✎ Edit steps</b>. "
+          "The sequence editor opens where you can name the sequence and enter steps."),
+        sp(2),
+        sub("Step Format"),
+        p("Enter one step per line in the text box:"),
+        p("  scene  fade(s)  delay(s)  [+Fixture=val ...]", "kbd"),
+        sp(2),
+        key_table([
+            ("scene",         "Scene slot number to recall. Omit for a channel-only step."),
+            ("fade",          "Fade time in seconds for this step."),
+            ("delay",         "Pause in seconds after the fade completes before the next step."),
+            ("+Fixture=val",  "Set a fixture master to a DMX value (0-255). "
+                               "Fixture name must match the patch exactly (spaces allowed). "
+                               "Multiple assignments per line are supported."),
+            ("# comment",     "Lines starting with # are ignored."),
+        ]),
+        sp(2),
+        sub("Examples"),
+        p("  2  0.0  0.5                        — recall scene 2 instant, wait 0.5s", "kbd"),
+        p("  5  3.0  0.0                        — recall scene 5 with 3s fade", "kbd"),
+        p("  +House Lights=0  1.0  0.5          — fade house lights out over 1s, wait 0.5s", "kbd"),
+        p("  5  3.0  0.0  +House Lights=128     — recall scene 5 and set house lights", "kbd"),
+        sp(2),
+        sub("Running and Stopping"),
+        key_table([
+            ("Left click",              "Run the sequence."),
+            ("Any scene button",        "Stops the running sequence and fires that scene."),
+            ("STOP FADE",               "Stops the running sequence at the current step."),
+            ("Teal button colour",      "Indicates a sequence slot."),
+            ("Gold button colour",      "Last recalled sequence or scene."),
+        ]),
+        sp(2),
+        sub("Converting Back"),
+        p("Right-click a sequence button and choose <b>↩ Convert to regular scene</b> "
+          "to restore it as a normal empty scene slot."),
+    ]
+    story += [
+
+        section_title("21. QLab Integration"),
         p("The desk receives OSC from QLab to recall scenes automatically. "
           "Art-Net HTP merge at the node allows both to send simultaneously."),
         sp(2), sub("QLab Setup"),
@@ -486,7 +532,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("21. Monitoring Tools"),
+        section_title("22. Monitoring Tools"),
         sub("monitor_gui.py — GUI Monitor (recommended)"),
         p("A tkinter companion application for testing and diagnosing DMX output. "
           "Run alongside desk.py on the same machine or any Mac on the same network."),
@@ -516,7 +562,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("22. Keyboard & Mouse"),
+        section_title("23. Keyboard & Mouse"),
         key_table([
             ("Ctrl+click fixture",       "Copy fixture state"),
             ("Click green fixture",      "Paste copied state"),
