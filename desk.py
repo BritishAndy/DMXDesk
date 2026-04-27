@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 130
+BUILD   = 149
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -562,11 +562,27 @@ class CustomFixture(tk.Frame):
             w = sz["ch_w"] if not small else max(10, int(sz["ch_w"] * 0.85))
             if ch.get("unit") == "named":
                 _nl_font = ("Helvetica", max(5, sz["ch_font"]-1))
-                _fader_px = w * 6
-                nl = tk.Label(col, text=named_label(ch, self._raw[orig_idx]),
+                # Measure actual pixel width of longest mode name at this font
+                _rng = ch.get("range", {})
+                if isinstance(_rng, dict) and _rng:
+                    _longest = max(_rng.values(), key=len)
+                else:
+                    _longest = "----"
+                try:
+                    import tkinter.font as _tkfont
+                    _f = _tkfont.Font(family="Helvetica",
+                                      size=max(5, sz["ch_font"]-1))
+                    _label_w = _f.measure(_longest) + 4
+                except Exception:
+                    _label_w = max(5, sz["ch_font"]-1) * len(_longest)
+                _nl_container = tk.Frame(col, bg=bg,
+                                         width=_label_w, height=sz["ch_font"] + 6)
+                _nl_container.pack()
+                _nl_container.pack_propagate(False)
+                nl = tk.Label(_nl_container, text=named_label(ch, self._raw[orig_idx]),
                               bg=bg, fg="#ffcc88", font=_nl_font,
-                              wraplength=_fader_px, anchor="center")
-                nl.pack()
+                              wraplength=_label_w, anchor="center")
+                nl.pack(fill=tk.BOTH, expand=True)
                 self._ch_namelabels[orig_idx] = nl
             if not is_colour:
                 # Constrain label width to fader width so column stays compact
@@ -4136,7 +4152,6 @@ def build_ui(patch: list, patch_path: Path = None):
     def _slot_bg(s):
         if s == _context_slot[0]:    return "#003366"   # blue — context panel open
         if s == selected_slot.get(): return "#cc8800"   # gold — last recalled
-        if _is_seq(s):               return "#003333"   # teal — sequence slot
         if s in scene_colours:
             try:
                 c = scene_colours[s].lstrip("#")
@@ -4151,7 +4166,6 @@ def build_ui(patch: list, patch_path: Path = None):
     def _slot_fg(s):
         if s == _context_slot[0]:    return "#88ccff"
         if s == selected_slot.get(): return "#000000"
-        if _is_seq(s):               return "#44ffee"   # teal text for sequences
         return "#ffffff" if s in scenes else "#aaaaaa"
 
     def _rebuild_scene_buttons():
@@ -4168,38 +4182,35 @@ def build_ui(patch: list, patch_path: Path = None):
             b.config(bg=_slot_bg(s), fg=_slot_fg(s),
                      activebackground=_darken(_slot_bg(s)),
                      activeforeground=_slot_fg(s),
-                     text=scene_names.get(s, f"Scene {s}"))
+                     text=("▶ " + scene_names.get(s, f"Scene {s}")) if _is_seq(s) else scene_names.get(s, f"Scene {s}"))
 
     def _select_slot(s): selected_slot.set(s); _refresh_buttons()
 
     def _edit_sequence_slot(slot):
-        """Dialog to create/edit a sequence stored in a scene slot."""
+        """Structured row editor for sequence slots."""
         win = tk.Toplevel(root)
         win.title(f"Edit Sequence — Slot {slot}")
         win.configure(bg="#1a1a1a")
         win.resizable(True, True)
-        win.minsize(380, 420)
+        win.minsize(520, 400)
 
-        # Restore saved geometry
         try:
             import json as _json
             with open(PREFS_FILE, "r") as _f:
                 _p = _json.load(_f)
-            win.geometry(_p.get("seq_editor_geometry", "420x560"))
+            win.geometry(_p.get("seq_editor_geometry", "560x520"))
         except Exception:
-            win.geometry("420x560")
+            win.geometry("560x520")
 
         def _on_close():
             try:
-                # Save geometry to prefs file directly
-                geo = win.geometry()
                 import json as _json
                 try:
                     with open(PREFS_FILE, "r") as _f:
                         _p = _json.load(_f)
                 except Exception:
                     _p = {}
-                _p["seq_editor_geometry"] = geo
+                _p["seq_editor_geometry"] = win.geometry()
                 with open(PREFS_FILE, "w") as _f:
                     _json.dump(_p, _f)
             except Exception:
@@ -4210,144 +4221,450 @@ def build_ui(patch: list, patch_path: Path = None):
         win.grab_set()
         win.protocol("WM_DELETE_WINDOW", _on_close)
 
-        existing = scenes.get(slot, {})
-        steps    = list(existing.get("sequence", []))
-        sname    = existing.get("name", f"Sequence {slot}")
+        existing  = scenes.get(slot, {})
+        sname     = existing.get("name", f"Sequence {slot}")
+        # Use pre-populated steps from conversion if available, else load sequence
+        init_steps = list(existing.pop("_pre_steps", None)
+                          or existing.get("sequence", []))
 
-        # Use grid for reliable button visibility
+        # ── Build fixture/channel lookups from patch ──────────────────────────
+        fixture_names = [fw.name for fw in all_widgets
+                         if isinstance(fw, (CustomFixture, DigitalFixture))]
+        def get_channels(fname):
+            """Return list of channel label strings for a fixture."""
+            for fw in all_widgets:
+                if fw.name == fname and isinstance(fw, CustomFixture):
+                    chans = []
+                    if fw._master_idx is not None:
+                        chans.append("Master")
+                    for orig_idx, ch_def in fw._visible:
+                        # ch_def is a dict like {"label": "R", ...}
+                        lbl = ch_def.get("label", str(orig_idx)) if isinstance(ch_def, dict) else str(ch_def)
+                        chans.append(lbl)
+                    return chans if chans else ["Master"]
+            return ["Master"]
+
+        scene_list = sorted(scenes.keys())
+        scene_opts = [f"{s} — {scenes[s].get('name', f'Scene {s}')}"
+                      for s in scene_list if "sequence" not in scenes[s]]
+
+        BG  = "#1a1a1a"
+        BG2 = "#222222"
+        BG3 = "#2a2a2a"
+        FG  = "#cccccc"
+        FGA = "#aaaaaa"
+        SEQ_TEAL = "#44ffee"
+
+        # ── Layout ───────────────────────────────────────────────────────────
         win.columnconfigure(0, weight=1)
-        win.rowconfigure(4, weight=1)   # steps row expands
+        win.rowconfigure(2, weight=1)
 
-        tk.Label(win, text=f"Sequence — Slot {slot}",
-                 bg="#1a1a1a", fg="#ffcc00",
-                 font=("Helvetica", 12, "bold")).grid(
-                 row=0, column=0, pady=(10,4), padx=12, sticky="w")
-
-        # Name
-        name_row = tk.Frame(win, bg="#1a1a1a")
-        name_row.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,6))
-        tk.Label(name_row, text="Name:", bg="#1a1a1a", fg="#aaaaaa",
-                 font=("Helvetica", 9), width=8, anchor="w").pack(side=tk.LEFT)
+        # Header
+        hdr = tk.Frame(win, bg=BG)
+        hdr.grid(row=0, column=0, sticky="ew", padx=12, pady=(10,6))
+        tk.Label(hdr, text=f"Sequence — Slot {slot}", bg=BG, fg="#ffcc00",
+                 font=("Helvetica", 12, "bold")).pack(side=tk.LEFT)
+        tk.Label(hdr, text="Name:", bg=BG, fg=FGA,
+                 font=("Helvetica", 9)).pack(side=tk.LEFT, padx=(16,4))
         name_var = tk.StringVar(value=sname)
-        tk.Entry(name_row, textvariable=name_var, width=22,
-                 bg="#333333", fg="#ffcc00", insertbackground="#ffcc00",
-                 font=("Helvetica", 10), relief=tk.FLAT, bd=3).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Entry(hdr, textvariable=name_var, width=20,
+                 bg=BG2, fg="#ffcc00", insertbackground="#ffcc00",
+                 font=("Helvetica", 10), relief=tk.FLAT, bd=3).pack(
+                 side=tk.LEFT, fill=tk.X, expand=True)
 
-        # Format help
-        help_frame = tk.Frame(win, bg="#111111", relief=tk.FLAT)
-        help_frame.grid(row=2, column=0, sticky="ew", padx=12, pady=(0,4))
-        help_text = (
-            "Format:  [scene]  fade(s)  delay(s)  [+Fixture=val ...]\n"
-            "  5  2.0  0.5              — recall scene 5, 2s fade, 0.5s delay\n"
-            "  5  2.0  0.0  +House Lights=128  — scene + set fixture\n"
-            "  +House Lights=0  1.0  0.5  — channel only, no scene\n"
-            "  # comment line           — ignored"
-        )
-        tk.Label(help_frame, text=help_text,
-                 bg="#111111", fg="#556677",
-                 font=("Courier", 8), justify=tk.LEFT,
-                 anchor="w").pack(fill=tk.X, padx=6, pady=4)
+        # Column headers
+        # Fixed column widths (pixels) — must match row grid layout
+        _CW = [30, 75, 160, 80, 45, 45, 45, 100]
 
-        tk.Label(win, text="Steps:",
-                 bg="#1a1a1a", fg="#aaaaaa",
-                 font=("Helvetica", 9)).grid(row=3, column=0, sticky="w", padx=12)
+        col_hdr = tk.Frame(win, bg=BG3)
+        col_hdr.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,2))
+        for ci, (text, w) in enumerate(zip(
+                ["#", "Type", "Name / Scene", "Ch", "Val", "Fade(s)", "Delay(s)", ""],
+                _CW)):
+            col_hdr.columnconfigure(ci, minsize=w)
+            tk.Label(col_hdr, text=text, bg=BG3, fg=FGA,
+                     font=("Helvetica", 8), anchor="w",
+                     width=0).grid(row=0, column=ci, sticky="w", padx=2)
 
-        # Steps text box
-        def steps_to_text(steps):
-            lines = []
-            for s in steps:
-                parts = []
-                if "scene" in s:
-                    parts.append(str(s["scene"]))
-                parts.append(str(s.get("fade", 0.0)))
-                parts.append(str(s.get("delay", 0.0)))
-                for k, v in s.get("channels", {}).items():
-                    parts.append(f"+{k}={v}")
-                lines.append("  ".join(parts))
-            return "\n".join(lines)
+        # Scrollable steps area
+        steps_outer = tk.Frame(win, bg=BG)
+        steps_outer.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0,4))
+        steps_outer.columnconfigure(0, weight=1)
+        steps_outer.rowconfigure(0, weight=1)
 
-        def text_to_steps(text):
-            import re as _re
+        canvas = tk.Canvas(steps_outer, bg=BG, highlightthickness=0)
+        scroll = ttk.Scrollbar(steps_outer, orient=tk.VERTICAL,
+                               command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.grid(row=0, column=1, sticky="ns")
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        steps_frame = tk.Frame(canvas, bg=BG)
+        canvas_win  = canvas.create_window((0,0), window=steps_frame, anchor="nw")
+        steps_frame.bind("<Configure>",
+                         lambda e: canvas.configure(
+                             scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig(canvas_win, width=e.width))
+
+        # ── Step row data ─────────────────────────────────────────────────────
+        # Each row is a dict with tk vars + frame ref
+        step_rows    = []
+        selected_rows = set()  # indices of selected rows
+
+        def _is_selected(r):
+            return step_rows.index(r) in selected_rows if r in step_rows else False
+
+        def _set_selected(indices):
+            selected_rows.clear()
+            selected_rows.update(indices)
+            for i, r in enumerate(step_rows):
+                bg = "#334433" if i in selected_rows else BG2
+                r["frame"].config(bg=bg)
+                r["num_lbl"].config(bg=bg)
+
+        def _toggle_select(r, shift=False):
+            idx = step_rows.index(r)
+            if shift and selected_rows:
+                # Select range from last selected to this
+                last = max(selected_rows)
+                lo, hi = min(last, idx), max(last, idx)
+                _set_selected(range(lo, hi + 1))
+            else:
+                if idx in selected_rows:
+                    selected_rows.discard(idx)
+                else:
+                    selected_rows.add(idx)
+                _set_selected(selected_rows)
+
+        fnt = ("Helvetica", 9)
+        fnt_e = ("Courier", 9)
+
+        def _step_from_row(r):
+            """Convert row vars to step dict."""
+            stype = r["type"].get()
+            step  = {}
+            try: step["fade"]  = float(r["fade"].get())
+            except Exception: step["fade"] = 0.0
+            try: step["delay"] = float(r["delay"].get())
+            except Exception: step["delay"] = 0.0
+            if stype == "Scene":
+                try:
+                    raw = r["scene"].get()
+                    slot_n = int(raw.split("—")[0].strip())
+                    step["scene"] = slot_n
+                except Exception:
+                    pass
+            else:
+                fname = r["fixture"].get()
+                chan  = r["channel"].get()
+                try: val = float(r["value"].get())
+                except Exception: val = 0.0
+                step["channels"] = {f"{fname}:{chan}": val}
+            return step
+
+        def _steps_to_sequence(rows):
+            """Convert row list to sequence list for storage."""
             result = []
-            for line in text.strip().splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"): continue
-
-                # Extract all +name=val assignments first (name may contain spaces)
-                # Match +...=number where name is everything between + and last =number
-                ch_assigns = {}
-                # Remove channel assignments from line before parsing numeric fields
-                ch_pattern = _re.compile(r'\+([^=+]+)=(\d+(?:\.\d+)?)')
-                for m in ch_pattern.finditer(line):
-                    name = m.group(1).strip()
-                    val  = float(m.group(2))
-                    ch_assigns[name] = val
-                # Remove all +name=val tokens from line
-                clean = ch_pattern.sub("", line).strip()
-
-                # Parse remaining numeric fields: [scene] [fade] [delay]
-                tokens = clean.split()
-                step = {}
-                if tokens and tokens[0].lstrip("-").isdigit():
-                    step["scene"] = int(tokens[0])
-                    tokens = tokens[1:]
-                if tokens:
-                    try: step["fade"]  = float(tokens[0])
-                    except Exception: pass
-                if len(tokens) > 1:
-                    try: step["delay"] = float(tokens[1])
-                    except Exception: pass
-                if ch_assigns:
-                    step["channels"] = ch_assigns
+            for r in rows:
+                stype = r["type"].get()
+                step  = {}
+                try: step["fade"]  = float(r["fade"].get())
+                except Exception: step["fade"] = 0.0
+                try: step["delay"] = float(r["delay"].get())
+                except Exception: step["delay"] = 0.0
+                if stype == "Scene":
+                    try:
+                        raw = r["scene"].get()
+                        slot_n = int(raw.split("—")[0].strip())
+                        step["scene"] = slot_n
+                    except Exception:
+                        pass
+                else:
+                    fname = r["fixture"].get()
+                    chan   = r["channel"].get()
+                    try: val = float(r["value"].get())
+                    except Exception: val = 0.0
+                    step["channels"] = {f"{fname}:{chan}": val}
                 if step:
                     result.append(step)
             return result
 
-        steps_container = tk.Frame(win, bg="#1a1a1a")
-        steps_container.grid(row=4, column=0, sticky="nsew", padx=12, pady=(2,4))
-        steps_container.columnconfigure(0, weight=1)
-        steps_container.rowconfigure(0, weight=1)
-        steps_scroll = tk.Scrollbar(steps_container)
-        steps_scroll.grid(row=0, column=1, sticky="ns")
-        steps_box = tk.Text(steps_container, height=7, width=28,
-                            bg="#222222", fg="#44ffee",
-                            insertbackground="#44ffee",
-                            font=("Courier", 10), relief=tk.FLAT, bd=3,
-                            yscrollcommand=steps_scroll.set)
-        steps_box.grid(row=0, column=0, sticky="nsew")
-        steps_scroll.config(command=steps_box.yview)
-        steps_box.insert("1.0", steps_to_text(steps))
-        tk.Label(win,
-                 text="One step per line: [scene]  fade  delay  [+Fixture=val ...]",
-                 bg="#1a1a1a", fg="#555555",
-                 font=("Helvetica", 8)).grid(row=5, column=0, sticky="w", padx=12)
+        def _delete_row(r):
+            r["frame"].destroy()
+            step_rows.remove(r)
+            _renumber()
 
-        # Scene name preview
-        preview_var = tk.StringVar(value="")
-        tk.Label(win, textvariable=preview_var,
-                 bg="#1a1a1a", fg="#44aa88",
-                 font=("Courier", 8), justify=tk.LEFT,
-                 height=4, anchor="nw").grid(
-                 row=6, column=0, sticky="w", padx=12, pady=(2,4))
+        def _move_row(r, direction):
+            idx = step_rows.index(r)
+            # If multiple rows selected, move them all as a group
+            if len(selected_rows) > 1 and idx in selected_rows:
+                sel = sorted(selected_rows)
+                if direction < 0 and sel[0] == 0: return
+                if direction > 0 and sel[-1] == len(step_rows) - 1: return
+                # Extract selected rows, insert at new position
+                moving = [step_rows[i] for i in sel]
+                rest   = [r for i, r in enumerate(step_rows) if i not in selected_rows]
+                insert_at = sel[0] + direction
+                insert_at = max(0, min(len(rest), insert_at))
+                for i, row in enumerate(moving):
+                    rest.insert(insert_at + i, row)
+                step_rows[:] = rest
+                new_sel = set(range(insert_at, insert_at + len(moving)))
+                _repack()
+                _set_selected(new_sel)
+            else:
+                new_idx = idx + direction
+                if new_idx < 0 or new_idx >= len(step_rows): return
+                step_rows.insert(new_idx, step_rows.pop(idx))
+                _repack()
 
-        def _update_preview(*_):
-            parsed = text_to_steps(steps_box.get("1.0", tk.END))
-            lines = []
-            for s in parsed[:6]:
-                if "scene" in s:
-                    sn = scenes.get(s["scene"], {}).get("name", f"Scene {s['scene']}")
-                    lines.append(f"  {s['scene']:>2}  {sn[:20]}")
+        def _move_to_top(r):
+            idx = step_rows.index(r)
+            if len(selected_rows) > 1 and idx in selected_rows:
+                sel = sorted(selected_rows)
+                moving = [step_rows[i] for i in sel]
+                rest   = [r for i, r in enumerate(step_rows) if i not in selected_rows]
+                step_rows[:] = moving + rest
+                _repack(); _set_selected(range(len(moving)))
+            else:
+                if idx == 0: return
+                step_rows.insert(0, step_rows.pop(idx))
+                _repack()
+
+        def _move_to_bottom(r):
+            idx = step_rows.index(r)
+            if len(selected_rows) > 1 and idx in selected_rows:
+                sel = sorted(selected_rows)
+                moving = [step_rows[i] for i in sel]
+                rest   = [r for i, r in enumerate(step_rows) if i not in selected_rows]
+                step_rows[:] = rest + moving
+                n = len(step_rows)
+                _repack(); _set_selected(range(n - len(moving), n))
+            else:
+                if idx == len(step_rows) - 1: return
+                step_rows.append(step_rows.pop(idx))
+                _repack()
+
+        def _repack():
+            for r in step_rows:
+                r["frame"].pack_forget()
+            for r in step_rows:
+                r["frame"].pack(fill=tk.X, pady=1)
+            _renumber()
+            steps_frame.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def _renumber():
+            for i, r in enumerate(step_rows):
+                r["num_lbl"].config(text=f"{i+1:>2}.")
+
+        def _update_channels(r, *_):
+            """When fixture changes, refresh channel dropdown."""
+            fname = r["fixture"].get()
+            chans = get_channels(fname)
+            r["chan_menu"]["values"] = chans
+            if chans and r["channel"].get() not in chans:
+                r["channel"].set(chans[0])
+
+        def _on_type_change(r, *_):
+            stype = r["type"].get()
+            for w in [r["scene_cb"], r["fix_cb"], r["chan_cb"], r["val_e"]]:
+                w.grid_remove()
+            if stype == "Scene":
+                r["scene_cb"].grid(row=0, column=2, sticky="ew", padx=2)
+            else:
+                r["fix_cb"].grid(row=0, column=2, sticky="ew", padx=2)
+                r["chan_cb"].grid(row=0, column=3, sticky="w", padx=2)
+                r["val_e"].grid(row=0, column=4, sticky="w", padx=2)
+                fname = r["fixture"].get()
+                chans = get_channels(fname)
+                r["chan_menu"]["values"] = chans
+                if r["channel"].get() not in chans and chans:
+                    r["channel"].set(chans[0])
+
+        def _add_row(step=None, pack=True):
+            stype   = "Scene"
+            s_val   = ""
+            f_val   = 0.0
+            d_val   = 0.0
+            fx_val  = fixture_names[0] if fixture_names else ""
+            ch_val  = ""
+            v_val   = 0.0
+
+            if step:
+                if "scene" in step:
+                    stype = "Scene"
+                    # Find matching scene option
+                    for opt in scene_opts:
+                        if opt.startswith(str(step["scene"]) + " "):
+                            s_val = opt; break
+                    if not s_val and scene_opts:
+                        s_val = scene_opts[0]
                 else:
-                    chs = "  ".join(f"{k}={v}" for k,v in s.get("channels",{}).items())
-                    lines.append(f"  ch  {chs[:24]}")
-            if len(parsed) > 6:
-                lines.append(f"  … +{len(parsed)-6} more")
-            preview_var.set("\n".join(lines) if lines else "")
-        steps_box.bind("<KeyRelease>", _update_preview)
-        _update_preview()
+                    stype = "Channel"
+                    chs = step.get("channels", {})
+                    if chs:
+                        key = list(chs.keys())[0]
+                        v_val = list(chs.values())[0]
+                        if ":" in key:
+                            fx_val, ch_val = key.split(":", 1)
+                        else:
+                            fx_val = key
+                f_val = step.get("fade", 0.0)
+                d_val = step.get("delay", 0.0)
+            elif scene_opts:
+                s_val = scene_opts[0]
+
+            row_frame = tk.Frame(steps_frame, bg=BG2, pady=2)
+            if pack:
+                row_frame.pack(fill=tk.X, pady=1)
+
+            r = {
+                "frame":   row_frame,
+                "type":    tk.StringVar(value=stype),
+                "scene":   tk.StringVar(value=s_val),
+                "fixture": tk.StringVar(value=fx_val),
+                "channel": tk.StringVar(value=ch_val),
+                "value":   tk.StringVar(value=str(v_val)),
+                "fade":    tk.StringVar(value=str(f_val)),
+                "delay":   tk.StringVar(value=str(d_val)),
+            }
+
+            # Use grid for pixel-aligned columns matching header
+            for ci, w in enumerate(_CW):
+                row_frame.columnconfigure(ci, minsize=w)
+
+            # Col 0: row number
+            r["num_lbl"] = tk.Label(row_frame, text="  .", bg=BG2, fg="#555555",
+                                    font=fnt)
+            r["num_lbl"].grid(row=0, column=0, sticky="w", padx=(4,0))
+
+            # Col 1: Type selector
+            type_cb = ttk.Combobox(row_frame, textvariable=r["type"],
+                                   values=["Scene", "Channel"],
+                                   state="readonly", font=fnt, width=7)
+            type_cb.grid(row=0, column=1, sticky="w", padx=2)
+            r["type_cb"] = type_cb
+
+            # Col 2: Scene or Fixture dropdown (shown/hidden by type)
+            r["scene_cb"] = ttk.Combobox(row_frame, textvariable=r["scene"],
+                                          values=scene_opts, font=fnt, width=16)
+            r["fix_cb"]   = ttk.Combobox(row_frame, textvariable=r["fixture"],
+                                          values=fixture_names, state="readonly",
+                                          font=fnt, width=12)
+
+            # Col 3: Channel dropdown
+            chans = get_channels(fx_val) if fx_val else []
+            if ch_val not in chans and chans:
+                ch_val = chans[0]
+                r["channel"].set(ch_val)
+            r["chan_cb"]   = ttk.Combobox(row_frame, textvariable=r["channel"],
+                                           values=chans, state="readonly",
+                                           font=fnt, width=8)
+            r["chan_menu"] = r["chan_cb"]
+
+            # Col 4: Value entry
+            r["val_e"] = tk.Entry(row_frame, textvariable=r["value"],
+                                   bg=BG3, fg=SEQ_TEAL,
+                                   insertbackground=SEQ_TEAL,
+                                   font=fnt_e, width=5, relief=tk.FLAT, bd=2)
+
+            # Col 5: Fade entry
+            r["fade_e"] = tk.Entry(row_frame, textvariable=r["fade"],
+                                    bg=BG3, fg=FG, insertbackground=FG,
+                                    font=fnt_e, width=5, relief=tk.FLAT, bd=2)
+            r["fade_e"].grid(row=0, column=5, sticky="w", padx=2)
+
+            # Col 6: Delay entry
+            r["delay_e"] = tk.Entry(row_frame, textvariable=r["delay"],
+                                     bg=BG3, fg=FG, insertbackground=FG,
+                                     font=fnt_e, width=5, relief=tk.FLAT, bd=2)
+            r["delay_e"].grid(row=0, column=6, sticky="w", padx=2)
+
+            # Col 7: Move/delete buttons
+            act = tk.Frame(row_frame, bg=BG2)
+            act.grid(row=0, column=7, sticky="w", padx=2)
+            btn(act, "⤒", bg=BG3, fg="#888888", font=("Helvetica", 7),
+                padx=2, pady=0, command=lambda r=r: _move_to_top(r)).pack(
+                side=tk.LEFT, padx=1)
+            btn(act, "▲", bg=BG3, fg="#888888", font=("Helvetica", 7),
+                padx=2, pady=0, command=lambda r=r: _move_row(r, -1)).pack(
+                side=tk.LEFT, padx=1)
+            btn(act, "▼", bg=BG3, fg="#888888", font=("Helvetica", 7),
+                padx=2, pady=0, command=lambda r=r: _move_row(r, 1)).pack(
+                side=tk.LEFT, padx=1)
+            btn(act, "⤓", bg=BG3, fg="#888888", font=("Helvetica", 7),
+                padx=2, pady=0, command=lambda r=r: _move_to_bottom(r)).pack(
+                side=tk.LEFT, padx=1)
+            btn(act, "✕", bg="#332222", fg="#ff8888", font=("Helvetica", 7),
+                padx=2, pady=0, command=lambda r=r: _delete_row(r)).pack(
+                side=tk.LEFT, padx=1)
+
+            # Click to select/deselect row
+            def _on_row_click(e, r=r):
+                _toggle_select(r, shift=bool(e.state & 0x1))
+            row_frame.bind("<ButtonPress-1>", _on_row_click)
+            r["num_lbl"].bind("<ButtonPress-1>", _on_row_click)
+
+            # Wire callbacks
+            r["type"].trace_add("write", lambda *a, r=r: _on_type_change(r))
+            r["fixture"].trace_add("write", lambda *a, r=r: _update_channels(r))
+
+            # Show correct widgets for type
+            _on_type_change(r)
+
+            step_rows.append(r)
+            _renumber()
+            return r
+
+        # ── Add button row ────────────────────────────────────────────────────
+        add_row = tk.Frame(win, bg=BG)
+        add_row.grid(row=3, column=0, sticky="w", padx=12, pady=(0,4))
+
+        def _add_step():
+            # Copy last step if there is one, otherwise add blank scene step
+            if step_rows:
+                last = step_rows[-1]
+                stype = last["type"].get()
+                if stype == "Scene":
+                    try:
+                        raw = last["scene"].get()
+                        slot_n = int(raw.split("—")[0].strip())
+                        template = {"scene": slot_n,
+                                    "fade":  float(last["fade"].get()),
+                                    "delay": float(last["delay"].get())}
+                    except Exception:
+                        template = {"fade": 0.0, "delay": 0.0}
+                else:
+                    fname = last["fixture"].get()
+                    chan   = last["channel"].get()
+                    try: val = float(last["value"].get())
+                    except Exception: val = 0.0
+                    try: fade = float(last["fade"].get())
+                    except Exception: fade = 0.0
+                    try: delay = float(last["delay"].get())
+                    except Exception: delay = 0.0
+                    template = {"channels": {f"{fname}:{chan}": val},
+                                "fade": fade, "delay": delay}
+                _add_row(template)
+            else:
+                _add_row({"fade": 0.0, "delay": 0.0})
+
+        btn(add_row, "+ Add Step", bg="#224433", fg="#aaffcc",
+            font=fnt, padx=8, pady=3,
+            command=_add_step).pack(side=tk.LEFT)
+
+        # ── Save / Cancel ─────────────────────────────────────────────────────
+        btn_row = tk.Frame(win, bg=BG)
+        btn_row.grid(row=4, column=0, pady=(4, 12))
+
+        # Fix rowconfigure — steps area is row 2
+        win.rowconfigure(2, weight=1)
+        win.rowconfigure(4, weight=0)
 
         def _save():
-            new_steps = text_to_steps(steps_box.get("1.0", tk.END))
+            new_steps = _steps_to_sequence(step_rows)
             name = name_var.get().strip() or f"Sequence {slot}"
             if slot not in scenes:
                 scenes[slot] = {}
@@ -4359,16 +4676,17 @@ def build_ui(patch: list, patch_path: Path = None):
             _refresh_buttons()
             _on_close()
 
-        btn_row = tk.Frame(win, bg="#1a1a1a")
-        btn_row.grid(row=7, column=0, pady=(4, 12))
-        btn(btn_row, "💾 Save", bg="#225533", fg="#44ffee",
+        btn(btn_row, "💾 Save", bg="#225533", fg=SEQ_TEAL,
             font=("Helvetica", 10, "bold"), padx=10, pady=5,
             command=_save).pack(side=tk.LEFT, padx=6)
         btn(btn_row, "Cancel", bg="#333333", fg="#888888",
             font=("Helvetica", 9), padx=8, pady=5,
             command=_on_close).pack(side=tk.LEFT, padx=6)
 
-        steps_box.focus_set()
+        # ── Load existing steps ───────────────────────────────────────────────
+        for step in init_steps:
+            _add_row(step)
+        _renumber()
 
     def _rename_slot(slot):
         if _scene_fade_active[0]: return
@@ -4747,6 +5065,79 @@ def build_ui(patch: list, patch_path: Path = None):
             btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            def _do_snapshot_to_scene(slot=slot):
+                """Save end-state of sequence as a regular scene."""
+                if slot not in scenes: return
+                seq_steps = scenes[slot].get("sequence", [])
+                if not seq_steps: return
+
+                # Calculate total sequence duration (sum of max_fade + delay per batch)
+                total_time = 0.0
+                i = 0
+                while i < len(seq_steps):
+                    batch_fade = 0.0
+                    batch_delay = 0.0
+                    while i < len(seq_steps):
+                        s = seq_steps[i]
+                        batch_fade = max(batch_fade, s.get("fade", 0.0))
+                        batch_delay = s.get("delay", 0.0)
+                        i += 1
+                        if batch_delay > 0:
+                            break
+                    total_time += batch_fade + batch_delay
+
+                # Build end-state by applying all steps in order to a virtual state
+                # Start from current fixture states then apply each step's target values
+                by_name = {fw.name: fw for fw in all_widgets}
+                end_state = {}  # {fixture_name: {ch_idx: val}}
+
+                for step in seq_steps:
+                    step_slot = step.get("scene")
+                    if step_slot is not None and step_slot in scenes:
+                        # Apply scene fixture states
+                        for fname, fstate in scenes[step_slot].get("fixtures", {}).items():
+                            if fname not in end_state:
+                                end_state[fname] = {}
+                            end_state[fname].update(fstate)
+                    # Apply channel overrides
+                    for key, val in step.get("channels", {}).items():
+                        if ":" in key:
+                            fname, chan_label = key.split(":", 1)
+                        else:
+                            fname, chan_label = key, "Master"
+                        fw = by_name.get(fname)
+                        if not fw or not isinstance(fw, CustomFixture): continue
+                        # Find channel index
+                        idx = None
+                        if chan_label == "Master" and fw._master_idx is not None:
+                            idx = fw._master_idx
+                        else:
+                            for orig_i, ch_def in fw._visible:
+                                lbl = ch_def.get("label","") if isinstance(ch_def,dict) else str(ch_def)
+                                if lbl == chan_label:
+                                    idx = orig_i; break
+                        if idx is not None:
+                            if fname not in end_state:
+                                end_state[fname] = {}
+                            end_state[fname][idx] = int(val)
+
+                # Store as regular scene with total_time as fade
+                sname = scenes[slot].get("name", f"Scene {slot}")
+                scenes[slot] = {
+                    "name":     sname,
+                    "fade":     round(total_time, 2),
+                    "fixtures": {fname: {str(k): v for k, v in fstate.items()}
+                                 for fname, fstate in end_state.items()},
+                }
+                if slot in scene_colours:
+                    scenes[slot]["colour"] = scene_colours[slot]
+                save_scenes_to_disk()
+                _refresh_buttons()
+                _close_context()
+
+            btn(inner, "📸  Snapshot to scene", "#223322", "#aaffaa",
+                font=("Helvetica", 8), pady=2,
+                command=_do_snapshot_to_scene).pack(fill=tk.X, pady=(0,2))
             btn(inner, "↩  Convert to regular scene", "#333322", "#cccc88",
                 font=("Helvetica", 8), pady=2,
                 command=_do_convert_to_scene).pack(fill=tk.X, pady=(0,2))
@@ -4760,9 +5151,50 @@ def build_ui(patch: list, patch_path: Path = None):
             btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            def _do_convert_to_seq(slot=slot):
+                _close_context()
+                # Pre-populate sequence steps from scene channel values
+                pre_steps = []
+                if slot in scenes:
+                    fixture_states = scenes[slot].get("fixtures", {})
+                    by_name = {fw.name: fw for fw in all_widgets}
+                    for fname, state in fixture_states.items():
+                        if fname not in by_name: continue
+                        fw = by_name[fname]
+                        if not isinstance(fw, CustomFixture): continue
+                        for idx_str, val in state.items():
+                            if val is None: continue
+                            try:
+                                idx = int(idx_str)
+                                raw_val = int(val)
+                            except Exception:
+                                continue
+                            # Find label for this channel index
+                            if idx == fw._master_idx:
+                                label = "Master"
+                            else:
+                                label = None
+                                for orig_i, ch_def in fw._visible:
+                                    if orig_i == idx:
+                                        label = ch_def.get("label", str(idx)) if isinstance(ch_def, dict) else str(ch_def)
+                                        break
+                            if label is None: continue
+                            fade = scenes[slot].get("fade", 0.0)
+                            pre_steps.append({
+                                "channels": {f"{fname}:{label}": raw_val},
+                                "fade":  fade,
+                                "delay": 0.0,
+                            })
+                # Open editor with pre-populated steps
+                # Temporarily store steps in a way the editor can pick them up
+                if slot not in scenes:
+                    scenes[slot] = {}
+                scenes[slot]["_pre_steps"] = pre_steps
+                _edit_sequence_slot(slot)
+
             btn(inner, "▶  Convert to sequence", "#223333", "#44ffee",
                 font=("Helvetica", 9), pady=3,
-                command=lambda: (_close_context(), _edit_sequence_slot(slot))).pack(fill=tk.X, pady=(0,2))
+                command=_do_convert_to_seq).pack(fill=tk.X, pady=(0,2))
             if has_scene:
                 btn(inner, "✕  Clear scene", "#442222", "#ff8888",
                     font=("Helvetica", 9), pady=3,
@@ -4878,41 +5310,59 @@ def build_ui(patch: list, patch_path: Path = None):
             ch_vals = step.get("channels", {})
             if not ch_vals: return
             by_name = {fw.name: fw for fw in all_widgets}
+            import time as _tm
+            _ch_start = _tm.time()
+
             for key, val in ch_vals.items():
-                val_0_1 = max(0.0, min(1.0, val / 255.0))
-                # Try fixture name match first
-                if key in by_name:
-                    fw = by_name[key]
-                    if hasattr(fw, "_master_idx") and fw._master_idx is not None:
-                        raw_val = int(val_0_1 * 255)
-                        state = {fw._master_idx: raw_val}
-                        if fade <= 0:
-                            fw.set_state(state)
-                        else:
-                            # Fade to value
-                            start = dict(fw.get_state())
-                            steps_n = max(1, int(fade * _fade_steps_sec))
-                            interval = int(fade * 1000 / steps_n)
-                            step_ref = [0]
-                            def _ch_fade(fw=fw, start=start, target=state,
-                                         steps_n=steps_n, interval=interval,
-                                         step_ref=step_ref):
-                                step_ref[0] += 1
-                                t = step_ref[0] / steps_n
-                                interp = {}
-                                for k in target:
-                                    s_v = start.get(k, 0)
-                                    e_v = target[k]
-                                    interp[k] = int(s_v + (e_v - s_v) * t)
-                                fw.set_state(interp)
-                                if step_ref[0] < steps_n and not _seq_stop_flag[0]:
-                                    root.after(interval, _ch_fade)
-                            _ch_fade()
-                # Try raw DMX channel (ch1, ch2, etc.)
-                elif key.lower().startswith("ch") and key[2:].isdigit():
-                    ch_idx = int(key[2:]) - 1
+                # Key format: "FixtureName:ChannelLabel" or legacy "FixtureName"
+                if ":" in key:
+                    fname, chan_label = key.split(":", 1)
+                else:
+                    fname, chan_label = key, None
+
+                # Raw DMX channel (ch1, ch2, etc.)
+                if fname.lower().startswith("ch") and fname[2:].isdigit():
+                    ch_idx = int(fname[2:]) - 1
                     if 0 <= ch_idx < 512:
                         dmx_values[ch_idx] = int(val)
+                    continue
+
+                fw = by_name.get(fname)
+                if not fw or not isinstance(fw, CustomFixture): continue
+
+                # Find channel index
+                target_idx = None
+                if chan_label in (None, "Master") and fw._master_idx is not None:
+                    target_idx = fw._master_idx
+                else:
+                    for orig_i, ch_def in fw._visible:
+                        lbl = ch_def.get("label", "") if isinstance(ch_def, dict) else str(ch_def)
+                        if lbl == chan_label:
+                            target_idx = orig_i
+                            break
+                    if target_idx is None and fw._master_idx is not None:
+                        target_idx = fw._master_idx
+
+                if target_idx is None: continue
+                raw_val = max(0, min(255, int(val)))
+                target_state = {target_idx: raw_val}
+
+                if fade <= 0:
+                    fw.set_state(target_state)
+                else:
+                    start_state = dict(fw.get_state())
+                    def _ch_fade(fw=fw, start=start_state, target=target_state,
+                                  t0=_ch_start, dur=fade):
+                        elapsed = _tm.time() - t0
+                        t = min(1.0, elapsed / dur)
+                        interp = {}
+                        for k, ev in target.items():
+                            sv = start.get(k, start.get(str(k), 0))
+                            interp[k] = int(sv + (ev - sv) * t)
+                        fw.set_state(interp)
+                        if t < 1.0 and not _seq_stop_flag[0]:
+                            root.after(25, _ch_fade)
+                    _ch_fade()
 
         def _fire(idx):
             if _seq_stop_flag[0] or idx >= len(steps):
@@ -4921,36 +5371,52 @@ def build_ui(patch: list, patch_path: Path = None):
                 _refresh_buttons()
                 return
 
-            step      = steps[idx]
-            step_slot = step.get("scene")
-            fade      = step.get("fade", 0.0)
-            delay     = step.get("delay", 0.0)
+            # Fire all consecutive steps with delay=0 simultaneously (a "batch")
+            # The batch ends at the first step with delay > 0
+            batch_idx   = idx
+            longest_fade = 0.0
+            batch_delay  = 0.0
 
-            def _after_fade(idx=idx, delay=delay):
-                """Called when fade completes — wait delay then fire next step."""
-                if _seq_stop_flag[0]: return
-                delay_ms = max(0, int(delay * 1000))
-                if delay_ms > 0:
-                    _seq_after_id[0] = root.after(delay_ms,
-                                                   lambda: _fire(idx + 1))
-                else:
-                    _fire(idx + 1)
+            while batch_idx < len(steps) and not _seq_stop_flag[0]:
+                step      = steps[batch_idx]
+                step_slot = step.get("scene")
+                fade      = step.get("fade", 0.0)
+                delay     = step.get("delay", 0.0)
 
-            if step_slot is not None and step_slot in scenes:
-                recall_scene(step_slot, all_widgets, root,
-                             fade_override=fade,
-                             on_complete=_after_fade,
-                             stop_flag=_seq_stop_flag)
-            else:
-                # No scene — apply channels then schedule next step
+                # Fire this step
+                if step_slot is not None and step_slot in scenes:
+                    recall_scene(step_slot, all_widgets, root,
+                                 fade_override=fade,
+                                 on_complete=None,
+                                 stop_flag=_seq_stop_flag)
                 _apply_step_channels(step, fade)
-                # Wait for channel fade + delay
-                wait_ms = max(100, int((fade + delay) * 1000))
-                _seq_after_id[0] = root.after(wait_ms, lambda: _fire(idx + 1))
-                return
 
-            # Apply any direct channel overrides alongside scene
-            _apply_step_channels(step, fade)
+                longest_fade = max(longest_fade, fade)
+                batch_idx   += 1
+
+                if delay > 0:
+                    batch_delay = delay
+                    break  # end of batch — wait fade + delay then continue
+                # delay == 0: loop immediately to fire next step in same batch
+
+            next_idx = batch_idx
+
+            if next_idx >= len(steps):
+                # Last batch — wait for longest fade then finish
+                def _finish():
+                    if _seq_stop_flag[0]: return
+                    _seq_running[0] = False
+                    _set_scene_buttons_state(tk.NORMAL)
+                    _refresh_buttons()
+                wait_ms = max(50, int(longest_fade * 1000))
+                _seq_after_id[0] = root.after(wait_ms, _finish)
+            else:
+                # Wait longest_fade + batch_delay then fire next batch
+                def _next(next_idx=next_idx):
+                    if _seq_stop_flag[0]: return
+                    _fire(next_idx)
+                wait_ms = max(50, int((longest_fade + batch_delay) * 1000))
+                _seq_after_id[0] = root.after(wait_ms, _next)
 
         _fire(0)
 
@@ -5008,6 +5474,7 @@ def build_ui(patch: list, patch_path: Path = None):
                 fw.clear_locks()
 
     def _do_zoom(delta):
+        if _scene_fade_active[0] or _seq_running[0]: return
         new_zoom = round(zoom_level[0] + delta, 2)
         if not (ZOOM_MIN <= new_zoom <= ZOOM_MAX): return
         zoom_level[0] = new_zoom
@@ -5027,7 +5494,7 @@ def build_ui(patch: list, patch_path: Path = None):
     ctrl_strip.pack(fill=tk.X, padx=6, pady=(2, 4))
 
     # Controls strip — left side
-    stop_fade_btn = btn(ctrl_strip, "◼ STOP FADE", bg="#333333", fg="#555555",
+    stop_fade_btn = btn(ctrl_strip, "◼ STOP", bg="#333333", fg="#555555",
         font=("Helvetica", 9, "bold"), pady=6,
         command=lambda: _do_stop_fade())
     stop_fade_btn.pack(side=tk.LEFT, padx=(0, 10))
@@ -5176,26 +5643,44 @@ def build_ui(patch: list, patch_path: Path = None):
         save_scenes_to_disk()
         _refresh_buttons()
 
+    # Fixed pixel height for all scene buttons — prevents height jumping
+    _scene_btn_h = 46  # px — tall enough for 2 lines at 9pt bold + pady
+
     for slot in range(1, NUM_SCENES + 1):
         grid_row, grid_col = _slot_pos(slot)
-        label = scene_names.get(slot, f"Scene {slot}")
-        b = MacButton(scene_grid, text=label,
+        _raw_label = scene_names.get(slot, f"Scene {slot}")
+        label = f"▶ {_raw_label}" if _is_seq(slot) else _raw_label
+
+        # Container enforces fixed height regardless of content
+        container = tk.Frame(scene_grid, bg="#111111",
+                             height=_scene_btn_h)
+        container.grid(row=grid_row, column=grid_col, sticky="ew", padx=2, pady=2)
+        container.pack_propagate(False)
+        container.grid_propagate(False)
+
+        b = MacButton(container, text=label,
                       bg=_slot_bg(slot), fg=_slot_fg(slot),
                       activebackground=_darken(_slot_bg(slot)),
                       activeforeground=_slot_fg(slot),
                       font=("Helvetica", 9, "bold"), pady=6, padx=2,
-                      height=2, justify=tk.CENTER,
+                      justify=tk.CENTER,
                       command=lambda s=slot: _do_go(s))
+        b.pack(fill=tk.BOTH, expand=True)
+
+        # Update wraplength when container width is known
+        def _update_wrap(e, b=b):
+            w = e.width - 4
+            if w > 10 and b.cget("wraplength") != w:
+                b.config(wraplength=w)
+        container.bind("<Configure>", _update_wrap)
+
         b.bind("<Button-2>",   lambda e, s=slot: _scene_context(s, e.x_root, e.y_root))
         b.bind("<Button-3>",   lambda e, s=slot: _scene_context(s, e.x_root, e.y_root))
-
-        b.bind("<Configure>",       lambda e, btn=b: btn.config(wraplength=e.width - 4))
         b.bind("<Control-Button-1>",        lambda e, s=slot: _drag_start(e, s))
         b.bind("<Control-B1-Motion>",       lambda e, s=slot: _drag_motion(e, s))
         b.bind("<Control-ButtonRelease-1>", lambda e, s=slot: (
                     _drag_end(e, s) if _drag_state.get("dragged")
                     else _scene_context(s, e.x_root, e.y_root)))
-        b.grid(row=grid_row, column=grid_col, sticky="ew", padx=2, pady=2)
         go_buttons[slot] = b
 
     # ── OSC callbacks ──
