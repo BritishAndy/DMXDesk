@@ -463,48 +463,56 @@ def build_full_manual(path):
 
     story += [
         section_title("20. Sequences"),
-        p("A sequence is a scene slot that automatically fires a series of scene recalls "
-          "with per-step fade times and delays. Sequences appear as teal-coloured scene "
-          "buttons and are triggered identically to regular scenes — by left-click, "
-          "OSC, or the scene Go button."),
+        p("A sequence is a scene slot that automatically fires a series of steps — "
+          "scene recalls, channel overrides, loops and waits — with per-step fade times "
+          "and gaps. Sequences show a <b>▶</b> prefix on the button and support custom "
+          "colours like regular scenes."),
         sp(2),
         sub("Creating a Sequence"),
-        p("Right-click any scene button and choose <b>▶ Convert to sequence</b>, "
+        p("Right-click any scene button and choose <b>▶ Convert to sequence</b> "
+          "(pre-populates from the scene's values if one exists), "
           "or right-click an existing sequence and choose <b>✎ Edit steps</b>. "
-          "The sequence editor opens where you can name the sequence and enter steps."),
+          "The structured row editor opens."),
         sp(2),
-        sub("Step Format"),
-        p("Enter one step per line in the text box:"),
-        p("  scene  fade(s)  delay(s)  [+Fixture=val ...]", "kbd"),
-        sp(2),
+        sub("Step Types"),
         key_table([
-            ("scene",         "Scene slot number to recall. Omit for a channel-only step."),
-            ("fade",          "Fade time in seconds for this step."),
-            ("delay",         "Pause in seconds after the fade completes before the next step."),
-            ("+Fixture=val",  "Set a fixture master to a DMX value (0-255). "
-                               "Fixture name must match the patch exactly (spaces allowed). "
-                               "Multiple assignments per line are supported."),
-            ("# comment",     "Lines starting with # are ignored."),
+            ("Scene",   "Recall a scene slot with its own fade time and gap."),
+            ("Channel", "Set a fixture channel to a value with a fade. "
+                        "Fields: Fixture, Channel, Value (0-255), Fade, Gap."),
+            ("Loop",    "Jump back to step N. Modes: fixed count, infinite, or Until GO."),
+            ("Wait",    "Pause the sequence until the sequence button is pressed again."),
         ]),
         sp(2),
-        sub("Examples"),
-        p("  2  0.0  0.5                        — recall scene 2 instant, wait 0.5s", "kbd"),
-        p("  5  3.0  0.0                        — recall scene 5 with 3s fade", "kbd"),
-        p("  +House Lights=0  1.0  0.5          — fade house lights out over 1s, wait 0.5s", "kbd"),
-        p("  5  3.0  0.0  +House Lights=128     — recall scene 5 and set house lights", "kbd"),
+        sub("Gap field"),
+        key_table([
+            ("0.0",      "Fire next step simultaneously (same batch)."),
+            ("0.5",      "Wait 0.5s after fade completes before next step."),
+            ("-1.0",     "Start next step 1s before this fade ends (overlapping)."),
+        ]),
+        sp(2),
+        sub("Loop modes"),
+        key_table([
+            ("count",    "Loop N times (set count field), then continue."),
+            ("infinite", "Loop forever until STOP is pressed."),
+            ("until GO", "Loop until sequence button pressed, completes current "
+                         "iteration then continues to next step."),
+        ]),
         sp(2),
         sub("Running and Stopping"),
         key_table([
-            ("Left click",              "Run the sequence."),
-            ("Any scene button",        "Stops the running sequence and fires that scene."),
-            ("STOP FADE",               "Stops the running sequence at the current step."),
-            ("Teal button colour",      "Indicates a sequence slot."),
-            ("Gold button colour",      "Last recalled sequence or scene."),
+            ("Left click",           "Run the sequence. Button stays gold while running."),
+            ("Click running button", "Advance a Wait step or flag loop-until-GO exit."),
+            ("Any other scene btn",  "Stops the sequence and fires that scene."),
+            ("◼ STOP",               "Stops the sequence immediately."),
         ]),
         sp(2),
-        sub("Converting Back"),
-        p("Right-click a sequence button and choose <b>↩ Convert to regular scene</b> "
-          "to restore it as a normal empty scene slot."),
+        sub("Context panel options"),
+        key_table([
+            ("✎ Edit steps",          "Open the structured step editor."),
+            ("📸 Snapshot to scene",  "Save end-state of sequence as a regular scene, "
+                                       "with total sequence duration as the fade time."),
+            ("↩ Convert to scene",    "Remove the sequence, restore as empty scene slot."),
+        ]),
     ]
     story += [
 

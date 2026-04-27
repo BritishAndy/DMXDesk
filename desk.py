@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 149
+BUILD   = 157
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -4179,6 +4179,20 @@ def build_ui(patch: list, patch_path: Path = None):
 
     def _refresh_buttons():
         for s, b in go_buttons.items():
+            # Don't override grey during lockout (except running sequence slot)
+            if _scene_fade_active[0] and s != _seq_slot[0]:
+                b.config(text=("▶ " + scene_names.get(s, f"Scene {s}")) if _is_seq(s)
+                         else scene_names.get(s, f"Scene {s}"))
+                continue
+            # Running sequence slot — keep gold and active
+            if _scene_fade_active[0] and s == _seq_slot[0]:
+                b.config(bg=_slot_bg(s), fg="#ffcc00",
+                         activebackground=_darken(_slot_bg(s)),
+                         activeforeground="#ffcc00",
+                         text=("▶ " + scene_names.get(s, f"Scene {s}")) if _is_seq(s) else scene_names.get(s, f"Scene {s}"))
+                try: b._container.config(bg=_slot_bg(s))
+                except Exception: pass
+                continue
             b.config(bg=_slot_bg(s), fg=_slot_fg(s),
                      activebackground=_darken(_slot_bg(s)),
                      activeforeground=_slot_fg(s),
@@ -4279,7 +4293,7 @@ def build_ui(patch: list, patch_path: Path = None):
         col_hdr = tk.Frame(win, bg=BG3)
         col_hdr.grid(row=1, column=0, sticky="ew", padx=12, pady=(0,2))
         for ci, (text, w) in enumerate(zip(
-                ["#", "Type", "Name / Scene", "Ch", "Val", "Fade(s)", "Delay(s)", ""],
+                ["#", "Type", "Name / Scene", "Ch", "Val", "Fade(s)", "Gap(s)", ""],
                 _CW)):
             col_hdr.columnconfigure(ci, minsize=w)
             tk.Label(col_hdr, text=text, bg=BG3, fg=FGA,
@@ -4346,8 +4360,8 @@ def build_ui(patch: list, patch_path: Path = None):
             step  = {}
             try: step["fade"]  = float(r["fade"].get())
             except Exception: step["fade"] = 0.0
-            try: step["delay"] = float(r["delay"].get())
-            except Exception: step["delay"] = 0.0
+            try: step["gap"] = float(r["gap"].get())
+            except Exception: step["gap"] = 0.0
             if stype == "Scene":
                 try:
                     raw = r["scene"].get()
@@ -4368,11 +4382,23 @@ def build_ui(patch: list, patch_path: Path = None):
             result = []
             for r in rows:
                 stype = r["type"].get()
-                step  = {}
-                try: step["fade"]  = float(r["fade"].get())
+                if stype == "Loop":
+                    try: lt = int(r["loop_to"].get())
+                    except Exception: lt = 1
+                    try: lc = int(r["loop_count"].get())
+                    except Exception: lc = 0
+                    result.append({"type": "loop", "loop_to": lt,
+                                   "loop_count": lc,
+                                   "loop_mode": r["loop_mode"].get()})
+                    continue
+                if stype == "Wait":
+                    result.append({"type": "wait"})
+                    continue
+                step = {}
+                try: step["fade"] = float(r["fade"].get())
                 except Exception: step["fade"] = 0.0
-                try: step["delay"] = float(r["delay"].get())
-                except Exception: step["delay"] = 0.0
+                try: step["gap"]  = float(r["gap"].get())
+                except Exception: step["gap"] = 0.0
                 if stype == "Scene":
                     try:
                         raw = r["scene"].get()
@@ -4469,19 +4495,31 @@ def build_ui(patch: list, patch_path: Path = None):
 
         def _on_type_change(r, *_):
             stype = r["type"].get()
-            for w in [r["scene_cb"], r["fix_cb"], r["chan_cb"], r["val_e"]]:
+            for w in [r["scene_cb"], r["fix_cb"], r["chan_cb"], r["val_e"],
+                      r["loop_frame"], r["wait_frame"],
+                      r["fade_e"], r["gap_e"]]:
                 w.grid_remove()
             if stype == "Scene":
                 r["scene_cb"].grid(row=0, column=2, sticky="ew", padx=2)
-            else:
+                r["fade_e"].grid(row=0, column=5, sticky="w", padx=2)
+                r["gap_e"].grid(row=0, column=6, sticky="w", padx=2)
+            elif stype == "Channel":
                 r["fix_cb"].grid(row=0, column=2, sticky="ew", padx=2)
                 r["chan_cb"].grid(row=0, column=3, sticky="w", padx=2)
                 r["val_e"].grid(row=0, column=4, sticky="w", padx=2)
+                r["fade_e"].grid(row=0, column=5, sticky="w", padx=2)
+                r["gap_e"].grid(row=0, column=6, sticky="w", padx=2)
                 fname = r["fixture"].get()
                 chans = get_channels(fname)
                 r["chan_menu"]["values"] = chans
                 if r["channel"].get() not in chans and chans:
                     r["channel"].set(chans[0])
+            elif stype == "Loop":
+                r["loop_frame"].grid(row=0, column=2, columnspan=5,
+                                     sticky="w", padx=2)
+            elif stype == "Wait":
+                r["wait_frame"].grid(row=0, column=2, columnspan=5,
+                                     sticky="w", padx=2)
 
         def _add_row(step=None, pack=True):
             stype   = "Scene"
@@ -4493,7 +4531,11 @@ def build_ui(patch: list, patch_path: Path = None):
             v_val   = 0.0
 
             if step:
-                if "scene" in step:
+                if step.get("type") == "loop":
+                    stype = "Loop"
+                elif step.get("type") == "wait":
+                    stype = "Wait"
+                elif "scene" in step:
                     stype = "Scene"
                     # Find matching scene option
                     for opt in scene_opts:
@@ -4512,7 +4554,7 @@ def build_ui(patch: list, patch_path: Path = None):
                         else:
                             fx_val = key
                 f_val = step.get("fade", 0.0)
-                d_val = step.get("delay", 0.0)
+                d_val = step.get("gap", 0.0)
             elif scene_opts:
                 s_val = scene_opts[0]
 
@@ -4520,15 +4562,23 @@ def build_ui(patch: list, patch_path: Path = None):
             if pack:
                 row_frame.pack(fill=tk.X, pady=1)
 
+            # Loop/Wait fields
+            loop_to_val    = step.get("loop_to", 1) if step else 1
+            loop_count_val = step.get("loop_count", 0) if step else 0
+            loop_mode_val  = step.get("loop_mode", "count") if step else "count"
+
             r = {
-                "frame":   row_frame,
-                "type":    tk.StringVar(value=stype),
-                "scene":   tk.StringVar(value=s_val),
-                "fixture": tk.StringVar(value=fx_val),
-                "channel": tk.StringVar(value=ch_val),
-                "value":   tk.StringVar(value=str(v_val)),
-                "fade":    tk.StringVar(value=str(f_val)),
-                "delay":   tk.StringVar(value=str(d_val)),
+                "frame":      row_frame,
+                "type":       tk.StringVar(value=stype),
+                "scene":      tk.StringVar(value=s_val),
+                "fixture":    tk.StringVar(value=fx_val),
+                "channel":    tk.StringVar(value=ch_val),
+                "value":      tk.StringVar(value=str(v_val)),
+                "fade":       tk.StringVar(value=str(f_val)),
+                "gap":        tk.StringVar(value=str(d_val)),
+                "loop_to":    tk.StringVar(value=str(loop_to_val)),
+                "loop_count": tk.StringVar(value=str(loop_count_val)),
+                "loop_mode":  tk.StringVar(value=loop_mode_val),
             }
 
             # Use grid for pixel-aligned columns matching header
@@ -4542,7 +4592,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
             # Col 1: Type selector
             type_cb = ttk.Combobox(row_frame, textvariable=r["type"],
-                                   values=["Scene", "Channel"],
+                                   values=["Scene", "Channel", "Loop", "Wait"],
                                    state="readonly", font=fnt, width=7)
             type_cb.grid(row=0, column=1, sticky="w", padx=2)
             r["type_cb"] = type_cb
@@ -4570,6 +4620,31 @@ def build_ui(patch: list, patch_path: Path = None):
                                    insertbackground=SEQ_TEAL,
                                    font=fnt_e, width=5, relief=tk.FLAT, bd=2)
 
+            # Loop widgets (shown for Loop type) — span cols 2-4
+            r["loop_frame"] = tk.Frame(row_frame, bg=BG2)
+            tk.Label(r["loop_frame"], text="→ step", bg=BG2, fg=FGA,
+                     font=fnt).pack(side=tk.LEFT)
+            tk.Entry(r["loop_frame"], textvariable=r["loop_to"],
+                     bg=BG3, fg="#ffcc00", insertbackground="#ffcc00",
+                     font=fnt_e, width=3, relief=tk.FLAT, bd=2).pack(side=tk.LEFT, padx=2)
+            tk.Label(r["loop_frame"], text="×", bg=BG2, fg=FGA,
+                     font=fnt).pack(side=tk.LEFT)
+            tk.Entry(r["loop_frame"], textvariable=r["loop_count"],
+                     bg=BG3, fg="#ffcc00", insertbackground="#ffcc00",
+                     font=fnt_e, width=3, relief=tk.FLAT, bd=2).pack(side=tk.LEFT, padx=2)
+            loop_mode_cb = ttk.Combobox(r["loop_frame"], textvariable=r["loop_mode"],
+                                         values=["count", "until GO", "infinite"],
+                                         state="readonly", font=fnt, width=8)
+            loop_mode_cb.pack(side=tk.LEFT, padx=2)
+            tk.Label(r["loop_frame"],
+                     text="(count=N, until GO, or infinite)", bg=BG2, fg="#555555",
+                     font=("Helvetica", 7)).pack(side=tk.LEFT, padx=4)
+
+            # Wait widget (shown for Wait type) — spans cols 2-4
+            r["wait_frame"] = tk.Frame(row_frame, bg=BG2)
+            tk.Label(r["wait_frame"], text="— Wait for GO —", bg=BG2, fg="#ffaa44",
+                     font=("Helvetica", 9, "italic")).pack(side=tk.LEFT, padx=8)
+
             # Col 5: Fade entry
             r["fade_e"] = tk.Entry(row_frame, textvariable=r["fade"],
                                     bg=BG3, fg=FG, insertbackground=FG,
@@ -4577,10 +4652,10 @@ def build_ui(patch: list, patch_path: Path = None):
             r["fade_e"].grid(row=0, column=5, sticky="w", padx=2)
 
             # Col 6: Delay entry
-            r["delay_e"] = tk.Entry(row_frame, textvariable=r["delay"],
+            r["gap_e"] = tk.Entry(row_frame, textvariable=r["gap"],
                                      bg=BG3, fg=FG, insertbackground=FG,
                                      font=fnt_e, width=5, relief=tk.FLAT, bd=2)
-            r["delay_e"].grid(row=0, column=6, sticky="w", padx=2)
+            r["gap_e"].grid(row=0, column=6, sticky="w", padx=2)
 
             # Col 7: Move/delete buttons
             act = tk.Frame(row_frame, bg=BG2)
@@ -4633,9 +4708,9 @@ def build_ui(patch: list, patch_path: Path = None):
                         slot_n = int(raw.split("—")[0].strip())
                         template = {"scene": slot_n,
                                     "fade":  float(last["fade"].get()),
-                                    "delay": float(last["delay"].get())}
+                                    "gap": float(last["gap"].get())}
                     except Exception:
-                        template = {"fade": 0.0, "delay": 0.0}
+                        template = {"fade": 0.0, "gap": 0.0}
                 else:
                     fname = last["fixture"].get()
                     chan   = last["channel"].get()
@@ -4643,13 +4718,13 @@ def build_ui(patch: list, patch_path: Path = None):
                     except Exception: val = 0.0
                     try: fade = float(last["fade"].get())
                     except Exception: fade = 0.0
-                    try: delay = float(last["delay"].get())
+                    try: delay = float(last["gap"].get())
                     except Exception: delay = 0.0
                     template = {"channels": {f"{fname}:{chan}": val},
-                                "fade": fade, "delay": delay}
+                                "fade": fade, "gap": delay}
                 _add_row(template)
             else:
-                _add_row({"fade": 0.0, "delay": 0.0})
+                _add_row({"fade": 0.0, "gap": 0.0})
 
         btn(add_row, "+ Add Step", bg="#224433", fg="#aaffcc",
             font=fnt, padx=8, pady=3,
@@ -4860,14 +4935,25 @@ def build_ui(patch: list, patch_path: Path = None):
         _scene_fade_active[0] = (state == tk.DISABLED)
         _scene_fade_stop[0]   = False
         for slot, b in go_buttons.items():
-            if state == tk.DISABLED:
-                b.config(fg="#555555")
+            # Keep running sequence slot visually active so operator can press GO
+            if state == tk.DISABLED and slot == _seq_slot[0]:
+                b.config(bg=_slot_bg(slot), fg="#ffcc00")
+                b._active_fg = "#ffcc00"
+                b._active_bg = _darken(_slot_bg(slot))
+                try: b._container.config(bg=_slot_bg(slot))
+                except Exception: pass
+            elif state == tk.DISABLED:
+                b.config(bg="#222222", fg="#555555")
                 b._active_fg = "#555555"
-                b._active_bg = b.cget("bg")
+                b._active_bg = "#222222"
+                try: b._container.config(bg="#222222")
+                except Exception: pass
             else:
-                b.config(fg=_slot_fg(slot))
+                b.config(bg=_slot_bg(slot), fg=_slot_fg(slot))
                 b._active_fg = _slot_fg(slot)
                 b._active_bg = _darken(_slot_bg(slot))
+                try: b._container.config(bg=_slot_bg(slot))
+                except Exception: pass
         # Light up stop button during fade, dim when idle
         if state == tk.DISABLED or _seq_running[0]:
             stop_fade_btn.config(bg="#663300", fg="#ff8800")
@@ -5051,7 +5137,7 @@ def build_ui(patch: list, patch_path: Path = None):
             steps = scenes[slot].get("sequence", [])
             for i, step in enumerate(steps[:5]):
                 sn = scenes.get(step.get("scene",""), {}).get("name", f"Scene {step.get('scene','?')}")
-                tk.Label(inner, text=f"  {i+1}. {sn[:18]}  f:{step.get('fade',0)}s  d:{step.get('delay',0)}s",
+                tk.Label(inner, text=f"  {i+1}. {sn[:18]}  f:{step.get('fade',0)}s  d:{step.get('gap',0)}s",
                          bg="#222222", fg="#44ffee",
                          font=("Courier", 7), anchor="w").pack(fill=tk.X)
             if len(steps) > 5:
@@ -5080,7 +5166,7 @@ def build_ui(patch: list, patch_path: Path = None):
                     while i < len(seq_steps):
                         s = seq_steps[i]
                         batch_fade = max(batch_fade, s.get("fade", 0.0))
-                        batch_delay = s.get("delay", 0.0)
+                        batch_delay = s.get("gap", 0.0)
                         i += 1
                         if batch_delay > 0:
                             break
@@ -5183,7 +5269,7 @@ def build_ui(patch: list, patch_path: Path = None):
                             pre_steps.append({
                                 "channels": {f"{fname}:{label}": raw_val},
                                 "fade":  fade,
-                                "delay": 0.0,
+                                "gap": 0.0,
                             })
                 # Open editor with pre-populated steps
                 # Temporarily store steps in a way the editor can pick them up
@@ -5264,6 +5350,10 @@ def build_ui(patch: list, patch_path: Path = None):
     _seq_running      = [False]
     _seq_after_id     = [None]
     _seq_stop_flag    = [False]
+    _seq_waiting      = [False]   # paused at Wait step
+    _seq_loop_go      = [False]   # exit loop-until-GO after iteration
+    _seq_wait_next    = [None]    # callback when GO pressed at Wait step
+    _seq_slot         = [None]    # currently running sequence slot
 
     def _scene_matches_current(slot):
         """True if current fixture states match the scene — no need to recall."""
@@ -5290,8 +5380,22 @@ def build_ui(patch: list, patch_path: Path = None):
             _seq_after_id[0] = None
         _seq_stop_flag[0] = True
         _seq_running[0]   = False
+        _seq_waiting[0]   = False
+        _seq_loop_go[0]   = False
+        _seq_wait_next[0] = None
+        _seq_slot[0]      = None
         _set_scene_buttons_state(tk.NORMAL)
         _refresh_buttons()
+
+    def _seq_go():
+        """Called when sequence button pressed while running — advance Wait or flag loop exit."""
+        if _seq_waiting[0]:
+            _seq_waiting[0] = False
+            cb = _seq_wait_next[0]
+            _seq_wait_next[0] = None
+            if cb: root.after(0, cb)
+        elif _seq_running[0] and not _seq_loop_go[0]:
+            _seq_loop_go[0] = True
 
     def _run_sequence(slot):
         """Run a sequence stored in scenes[slot]['sequence']."""
@@ -5301,6 +5405,10 @@ def build_ui(patch: list, patch_path: Path = None):
 
         _seq_running[0]   = True
         _seq_stop_flag[0] = False
+        _seq_waiting[0]   = False
+        _seq_loop_go[0]   = False
+        _seq_wait_next[0] = None
+        _seq_slot[0]      = slot   # set BEFORE disabling buttons so gold shows
         _set_scene_buttons_state(tk.DISABLED)
         _select_slot(slot)
         _refresh_buttons()
@@ -5364,65 +5472,102 @@ def build_ui(patch: list, patch_path: Path = None):
                             root.after(25, _ch_fade)
                     _ch_fade()
 
+        _seq_slot[0] = slot
+        loop_counters = {}
+
+        def _seq_done():
+            _seq_running[0]   = False
+            _seq_waiting[0]   = False
+            _seq_loop_go[0]   = False
+            _seq_slot[0]      = None
+            _set_scene_buttons_state(tk.NORMAL)
+            _refresh_buttons()
+
         def _fire(idx):
-            if _seq_stop_flag[0] or idx >= len(steps):
-                _seq_running[0] = False
-                _set_scene_buttons_state(tk.NORMAL)
+            if _seq_stop_flag[0]: _seq_done(); return
+            if idx >= len(steps): _seq_done(); return
+
+            step  = steps[idx]
+            stype = step.get("type", "")
+
+            # ── Wait step ────────────────────────────────────────────
+            if stype == "wait":
+                _seq_waiting[0]   = True
+                _seq_wait_next[0] = lambda: _fire(idx + 1)
                 _refresh_buttons()
                 return
 
-            # Fire all consecutive steps with delay=0 simultaneously (a "batch")
-            # The batch ends at the first step with delay > 0
-            batch_idx   = idx
+            # ── Loop step ────────────────────────────────────────────
+            if stype == "loop":
+                loop_to   = max(0, step.get("loop_to", 1) - 1)  # 0-indexed
+                loop_mode = step.get("loop_mode", "count")
+                lcount    = step.get("loop_count", 0)
+                if loop_mode == "until GO":
+                    if _seq_loop_go[0]:
+                        _seq_loop_go[0] = False
+                        _fire(idx + 1)
+                    else:
+                        _fire(loop_to)
+                elif loop_mode == "infinite":
+                    _fire(loop_to)
+                else:
+                    if idx not in loop_counters:
+                        loop_counters[idx] = lcount
+                    if loop_counters[idx] > 0:
+                        loop_counters[idx] -= 1
+                        _fire(loop_to)
+                    else:
+                        del loop_counters[idx]
+                        _fire(idx + 1)
+                return
+
+            # ── Scene/Channel batch ───────────────────────────────────
+            batch_idx    = idx
             longest_fade = 0.0
-            batch_delay  = 0.0
+            batch_gap    = 0.0
 
             while batch_idx < len(steps) and not _seq_stop_flag[0]:
-                step      = steps[batch_idx]
-                step_slot = step.get("scene")
-                fade      = step.get("fade", 0.0)
-                delay     = step.get("delay", 0.0)
-
-                # Fire this step
+                s      = steps[batch_idx]
+                stype2 = s.get("type", "")
+                if stype2 in ("loop", "wait"):
+                    break
+                fade = s.get("fade", 0.0)
+                gap  = s.get("gap",  0.0)
+                step_slot = s.get("scene")
                 if step_slot is not None and step_slot in scenes:
                     recall_scene(step_slot, all_widgets, root,
                                  fade_override=fade,
                                  on_complete=None,
                                  stop_flag=_seq_stop_flag)
-                _apply_step_channels(step, fade)
-
+                _apply_step_channels(s, fade)
                 longest_fade = max(longest_fade, fade)
                 batch_idx   += 1
+                if gap != 0:
+                    batch_gap = gap
+                    break
 
-                if delay > 0:
-                    batch_delay = delay
-                    break  # end of batch — wait fade + delay then continue
-                # delay == 0: loop immediately to fire next step in same batch
-
-            next_idx = batch_idx
+            next_idx  = batch_idx
+            wait_secs = max(0.01, longest_fade + batch_gap)
+            wait_ms   = int(wait_secs * 1000)
 
             if next_idx >= len(steps):
-                # Last batch — wait for longest fade then finish
-                def _finish():
-                    if _seq_stop_flag[0]: return
-                    _seq_running[0] = False
-                    _set_scene_buttons_state(tk.NORMAL)
-                    _refresh_buttons()
-                wait_ms = max(50, int(longest_fade * 1000))
-                _seq_after_id[0] = root.after(wait_ms, _finish)
+                _seq_after_id[0] = root.after(
+                    max(50, int(longest_fade * 1000)), _seq_done)
             else:
-                # Wait longest_fade + batch_delay then fire next batch
-                def _next(next_idx=next_idx):
+                def _next(ni=next_idx):
                     if _seq_stop_flag[0]: return
-                    _fire(next_idx)
-                wait_ms = max(50, int((longest_fade + batch_delay) * 1000))
+                    _fire(ni)
                 _seq_after_id[0] = root.after(wait_ms, _next)
 
         _fire(0)
 
     def _do_go(slot):
+        # Always allow GO on the currently running sequence slot
+        if _seq_running[0] and _seq_slot[0] == slot:
+            _seq_go()
+            return
         if _scene_fade_active[0]: return
-        # Stop any running sequence
+        # Stop any other running sequence
         if _seq_running[0]:
             _stop_sequence()
         _select_slot(slot)
@@ -5682,6 +5827,7 @@ def build_ui(patch: list, patch_path: Path = None):
                     _drag_end(e, s) if _drag_state.get("dragged")
                     else _scene_context(s, e.x_root, e.y_root)))
         go_buttons[slot] = b
+        b._container = container
 
     # ── OSC callbacks ──
     def _osc_recall(slot):
