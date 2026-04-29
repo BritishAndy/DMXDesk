@@ -1,5 +1,4 @@
 {
-  "colour": "#2b552b",
   "channels": [
     {"label": "Dimmer", "master": true, "default": 0, "range": [0, 100], "unit": "%", "show": true}
   ]

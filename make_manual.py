@@ -121,9 +121,9 @@ def build_full_manual(path):
             ("17. Open Fixture Library",  "Importing fixtures from OFL"),
             ("18. Settings",              "Art-Net, appearance, behaviour, OSC"),
             ("19. Save & Load",           "Saving shows and patches"),
-            ("21. QLab Integration",      "OSC control from QLab"),
-            ("22. Monitoring Tools",       "monitor_gui.py and monitor.py"),
-            ("23. Keyboard & Mouse",      "Quick reference"),
+            ("22. QLab Integration",      "OSC control from QLab"),
+            ("23. Monitoring Tools",       "monitor_gui.py and monitor.py"),
+            ("24. Keyboard & Mouse",      "Quick reference"),
         ], col_widths=[60*mm, 105*mm]),
         PageBreak(),
     ]
@@ -515,8 +515,32 @@ def build_full_manual(path):
         ]),
     ]
     story += [
+        section_title("21. Groups"),
+        p("Groups allow multiple fixtures to be controlled together from a single "
+          "master strip. Member fixtures are built inside the group widget and do not "
+          "appear as individual faceplates. The master strip shows the same fader "
+          "layout as the member fixture type."),
+        sp(2),
+        sub("Defining a Group"),
+        p("Add a group entry in the patch editor using <b>+ Add Group</b>. "
+          "Enter member fixture names (comma-separated) in the Members field. "
+          "Set an outline colour to visually distinguish the group."),
+        sp(2),
+        sub("Group Controls"),
+        key_table([
+            ("\u203a  /  \u2039", "Expand or collapse member fixture panels."),
+            ("ACT",          "Align all members to group master over 0.5s then take control. "
+                             "Amber = active. Moving any member fader extinguishes ACT."),
+            ("Master fader", "When ACT is lit, all member channels follow."),
+        ]),
+        sp(2),
+        sub("Scene Integration"),
+        p("Group master position and ACT status are stored with each scene and restored "
+          "on recall. The master display tracks fading members in real time."),
+    ]
+    story += [
 
-        section_title("21. QLab Integration"),
+        section_title("22. QLab Integration"),
         p("The desk receives OSC from QLab to recall scenes automatically. "
           "Art-Net HTP merge at the node allows both to send simultaneously."),
         sp(2), sub("QLab Setup"),
@@ -540,7 +564,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("22. Monitoring Tools"),
+        section_title("23. Monitoring Tools"),
         sub("monitor_gui.py — GUI Monitor (recommended)"),
         p("A tkinter companion application for testing and diagnosing DMX output. "
           "Run alongside desk.py on the same machine or any Mac on the same network."),
@@ -570,7 +594,7 @@ def build_full_manual(path):
     ]
 
     story += [
-        section_title("23. Keyboard & Mouse"),
+        section_title("24. Keyboard & Mouse"),
         key_table([
             ("Ctrl+click fixture",       "Copy fixture state"),
             ("Click green fixture",      "Paste copied state"),

@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 157
+BUILD   = 197
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -183,39 +183,16 @@ _clipboard = {
 FIXTURES_DIR = APP_DIR / "fixtures"
 MANUAL_FILE  = APP_DIR / "DMX_Desk_Manual.pdf"
 
-# Built-in definitions — used when no .json file exists
-_BUILTIN_DEFS = {
-    "dimmer": {"channels": [
-        {"label": "Dimmer", "master": True, "default": 0,
-         "range": [0, 100], "unit": "%", "show": True},
-    ]},
-    "rgb": {"channels": [
-        {"label": "Intensity", "master": True,  "default": 0,   "range": [0, 100], "unit": "%",   "show": True},
-        {"label": "R",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-        {"label": "G",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-        {"label": "B",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-    ]},
-    "rgbw": {"channels": [
-        {"label": "Intensity", "master": True,  "default": 0,   "range": [0, 100], "unit": "%",   "show": True},
-        {"label": "R",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-        {"label": "G",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-        {"label": "B",         "master": False, "default": 0,   "range": [0, 255], "unit": "raw", "show": True},
-        {"label": "W",         "master": False, "default": 255, "range": [0, 255], "unit": "raw", "show": True},
-    ]},
-}
-
 _def_cache = {}
 
 def load_fixture_def(ftype: str) -> dict:
-    """Load a fixture definition from fixtures/<ftype>.json, or use built-in."""
+    """Load a fixture definition from fixtures/<ftype>.json."""
     if ftype in _def_cache:
         return _def_cache[ftype]
     path = FIXTURES_DIR / f"{ftype}.json"
     if path.exists():
         with open(path) as f:
             defn = json.load(f)
-    elif ftype in _BUILTIN_DEFS:
-        defn = _BUILTIN_DEFS[ftype]
     else:
         raise ValueError(f"Unknown fixture type '{ftype}' — no definition file at {path}")
     _def_cache[ftype] = defn
@@ -1174,6 +1151,309 @@ class DigitalFixture(tk.Frame):
 
     def set_master_value(self, val): pass  # not applicable
 
+# ── GroupWidget ───────────────────────────────────────────────────────────────
+
+class GroupWidget(tk.Frame):
+    """
+    Collapsible group fixture. The master strip is a real CustomFixture
+    wired to propagate all fader moves to member fixtures.
+
+    ACT (amber): aligns members to group master over 0.5s, then takes control.
+    Moving any member fader independently extinguishes ACT.
+    Expand arrow (›/‹): reveals/hides member fixture widgets.
+
+    patch.json:
+        {"type": "group", "name": "Set Group",
+         "members": ["Set Left","Set Center","Set Right"], "row": 1}
+    """
+    ALIGN_MS = 500
+    BG   = "#1e1e2e"
+    AMBR = "#ff9900"
+    DIM  = "#555544"
+
+    def __init__(self, parent, name="Group", members=None,
+                 member_defs=None, sz=None, gm_var=None,
+                 root_ref=None, outline_colour=None, **kwargs):
+        kwargs.pop("highlightthickness", None)
+        kwargs.pop("highlightbackground", None)
+        super().__init__(parent, **kwargs)
+        self._outline_colour = outline_colour or self.BG
+        self.name            = name
+        self._members        = members or []
+        self._member_defs    = member_defs or []
+        self._sz             = sz or DEFAULT_SIZES
+        self._root           = root_ref
+        self._active         = False
+        self._expanded       = False
+        self._after_id       = None
+        self._member_widgets = []
+        self._master_fixture = None  # CustomFixture used as group master strip
+
+        # Solo stubs
+        class _SS:
+            soloed = False
+            def set_on(self): pass
+            def reset(self): pass
+        self.solo_btn     = _SS()
+        self.fixture_solo = _SS()
+        self._ch_solos    = {}
+
+        self.configure(bg=self.BG, relief=tk.RIDGE, bd=2,
+                       highlightthickness=3,
+                       highlightbackground=self._outline_colour)
+
+        fsm = ("Helvetica", max(6, sz["btn_font"] - 1) if sz else 7)
+
+        # ── Outer frame: master strip | member panel ─────────────────────────
+        self._outer = tk.Frame(self, bg=self.BG)
+        self._outer.pack(fill=tk.BOTH, expand=True)
+
+        # ── Left: master container ────────────────────────────────────────────
+        self._master_frame = tk.Frame(self._outer, bg=self.BG)
+        self._master_frame.pack(side=tk.LEFT, fill=tk.Y)
+
+        self._exp_btn = None  # built inside master fixture header
+
+        # ACT button at bottom of master frame
+        self._act_btn = tk.Label(self._master_frame, text="ACT",
+                                  bg="#2a2a1a", fg=self.DIM,
+                                  font=fsm, relief=tk.RAISED, bd=1,
+                                  padx=2, pady=1, cursor="hand2")
+        self._act_btn.pack(side=tk.BOTTOM, pady=(0, 2))
+        self._act_btn.bind("<Button-1>", lambda e: self._toggle_active())
+
+        # ── Right: member panel (hidden until expanded) ───────────────────────
+        self._mpanel = tk.Frame(self._outer, bg=self.BG)
+        # Not packed yet
+
+        # Build everything
+        self._build_master()
+        self._build_members()
+
+    # ── Build ─────────────────────────────────────────────────────────────────
+
+    def _build_master(self):
+        """Build master CustomFixture from first member's definition."""
+        if not self._member_defs:
+            return
+        patch_entry, defn = self._member_defs[0]
+        colour = patch_entry.get("colour", "#2b2b2b")
+        try:
+            mf = CustomFixture(self._master_frame,
+                               self.name,
+                               patch_entry["address"],  # address unused but required
+                               defn["channels"],
+                               sz=self._sz,
+                               colour=colour)
+            mf.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+            self._master_fixture = mf
+
+            # Master fixture is visual only — suppress its DMX output
+            mf._push_dmx = lambda: None
+            mf.apply_gm  = lambda gm: None
+
+            # Remove solo buttons from master — not meaningful for a group master
+            try:
+                mf.fixture_solo.pack_forget()
+            except Exception: pass
+            for sb in mf._ch_solos.values():
+                try: sb.pack_forget()
+                except Exception: pass
+
+            # Add expand arrow into master's header (next to name label)
+            try:
+                # Find the header frame (first child Frame of mf)
+                for child in mf.winfo_children():
+                    if isinstance(child, tk.Frame):
+                        self._exp_btn = tk.Label(child, text="›",
+                                                  bg=mf._bg, fg="#888888",
+                                                  font=("Helvetica",
+                                                        (self._sz["btn_font"] if self._sz else 9) + 2),
+                                                  cursor="hand2")
+                        self._exp_btn.pack(side=tk.RIGHT, padx=2)
+                        self._exp_btn.bind("<Button-1>", lambda e: self._toggle_expand())
+                        break
+            except Exception as e:
+                print(f"GroupWidget: could not add expand btn: {e}")
+
+            # Override _on_fader to propagate to all members
+            orig_on_fader = mf._on_fader
+            grp = self
+            def _group_on_fader(ch_idx, val, _orig=orig_on_fader):
+                _orig(ch_idx, val)  # update master display
+                if grp._active:
+                    for fw in grp._member_widgets:
+                        if isinstance(fw, CustomFixture):
+                            fw._on_fader(ch_idx, val)
+                            fdr = fw._ch_faders.get(ch_idx)
+                            if fdr is not None:
+                                fdr.set(int(float(val)))
+                            if ch_idx == fw._master_idx and fw._master_fader is not None:
+                                fw._master_fader.set(int(float(val)))
+            mf._on_fader = _group_on_fader
+
+            # Re-bind all faders on master to use new _on_fader
+            if mf._master_fader is not None and mf._master_idx is not None:
+                mf._master_fader.config(
+                    command=lambda v, i=mf._master_idx: mf._on_fader(i, v))
+            for idx, fdr in mf._ch_faders.items():
+                fdr.config(command=lambda v, i=idx: mf._on_fader(i, v))
+
+        except Exception as e:
+            import traceback
+            print(f"GroupWidget {self.name}: failed to build master: {e}")
+            traceback.print_exc()
+
+    def _build_members(self):
+        """Build member CustomFixture widgets inside the member panel."""
+        for patch_entry, defn in self._member_defs:
+            try:
+                colour = patch_entry.get("colour", "#2b2b2b")
+                w = CustomFixture(self._mpanel,
+                                  patch_entry["name"],
+                                  patch_entry["address"],
+                                  defn["channels"],
+                                  sz=self._sz,
+                                  colour=colour)
+                w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
+                self._member_widgets.append(w)
+                self._watch(w)
+                self._watch_state(w)
+            except Exception as e:
+                import traceback
+                print(f"GroupWidget: failed to build {patch_entry.get('name','?')}: {e}")
+                traceback.print_exc()
+        # ACT state will be restored by set_state after rebuild
+        # Default to True only on first build (no prior state)
+        if self._member_widgets:
+            self._set_active(True)  # default; overridden by set_state if restoring
+
+    def _watch(self, fw):
+        """Detect independent member fader moves — extinguish ACT."""
+        def _human_touch(e):
+            if self._active:
+                self._set_active(False)
+        if hasattr(fw, "_master_fader") and fw._master_fader is not None:
+            fw._master_fader.bind("<ButtonPress-1>", _human_touch, add="+")
+        for fdr in fw._ch_faders.values():
+            fdr.bind("<ButtonPress-1>", _human_touch, add="+")
+
+    def _watch_state(self, fw):
+        """Detect independent state changes — extinguish ACT.
+        Does NOT fire during scene recalls (_scene_recalling flag)
+        or during group's own align (_aligning flag)."""
+        orig = fw.set_state
+        grp  = self
+        def _hooked_state(state, _orig=orig):
+            import builtins as _b
+            recalling = getattr(_b, "_dmx_scene_recalling", False)
+            if grp._active and not recalling and not getattr(grp, "_aligning", False):
+                grp._set_active(False)
+            _orig(state)
+        fw.set_state = _hooked_state
+
+    # ── ACT ───────────────────────────────────────────────────────────────────
+
+    def _set_active(self, state):
+        self._active = state
+        if state:
+            self._act_btn.config(bg="#553300", fg=self.AMBR, relief=tk.SUNKEN)
+        else:
+            self._act_btn.config(bg="#2a2a1a", fg=self.DIM,  relief=tk.RAISED)
+
+    def _toggle_active(self):
+        if self._active:
+            self._set_active(False)
+        else:
+            self._set_active(True)
+            self._align_members()
+
+    def _align_members(self):
+        self._align_and_activate(set_active_at_end=False)
+
+    def _align_and_activate(self, set_active_at_end=True):
+        """Fade all members to match group master over ALIGN_MS."""
+        import time as _t
+        mf = self._master_fixture
+        if not mf or not self._member_widgets:
+            if set_active_at_end: self._set_active(True)
+            return
+
+        # Snapshot current state of group master and each member
+        master_state = {i: mf._raw[i] for i in range(len(mf._raw))}
+        starts = {fw: {i: fw._raw[i] for i in range(len(fw._raw))}
+                  for fw in self._member_widgets
+                  if isinstance(fw, CustomFixture)}
+
+        t0   = _t.time()
+        fade = self.ALIGN_MS / 1000.0
+
+        self._aligning = True
+        def _step():
+            t = min(1.0, (_t.time() - t0) / fade)
+            for fw, start in starts.items():
+                for ch_idx, target_val in master_state.items():
+                    if ch_idx >= len(fw._raw): continue
+                    v = int(start[ch_idx] + (target_val - start[ch_idx]) * t)
+                    fw._on_fader(ch_idx, v)
+                    fdr = fw._ch_faders.get(ch_idx)
+                    if fdr is not None: fdr.set(v)
+                    if ch_idx == fw._master_idx and fw._master_fader is not None:
+                        fw._master_fader.set(v)
+            if t < 1.0:
+                self._after_id = self._root.after(25, _step) if self._root else None
+            else:
+                self._aligning = False
+                if set_active_at_end: self._set_active(True)
+        _step()
+
+    # ── Expand / collapse ─────────────────────────────────────────────────────
+
+    def _toggle_expand(self):
+        if self._expanded:
+            self._mpanel.pack_forget()
+            self._expanded = False
+            self._exp_btn.config(text="›")
+        else:
+            self._mpanel.pack(side=tk.LEFT, fill=tk.Y, padx=(4, 0))
+            self._expanded = True
+            self._exp_btn.config(text="‹")
+
+    # ── Compatibility stubs ───────────────────────────────────────────────────
+
+    def get_state(self):
+        state = self._master_fixture.get_state() if self._master_fixture else {}
+        state["_act"] = self._active
+        return state
+
+    def get_soloed_state(self): return self.get_state()
+
+    def set_state(self, state):
+        if not state: return
+        act = state.pop("_act", None)
+        if self._master_fixture:
+            self._master_fixture.set_state(state)
+        # Restore ACT state and propagate master to members if active
+        if act is not None:
+            self._set_active(act)
+            if act:
+                # Propagate current master values to all members
+                mf = self._master_fixture
+                if mf:
+                    for fw in self._member_widgets:
+                        if isinstance(fw, CustomFixture):
+                            for ch_idx in range(len(mf._raw)):
+                                if ch_idx < len(fw._raw):
+                                    fw._on_fader(ch_idx, mf._raw[ch_idx])
+                                    fdr = fw._ch_faders.get(ch_idx)
+                                    if fdr is not None: fdr.set(mf._raw[ch_idx])
+                                    if ch_idx == fw._master_idx and fw._master_fader:
+                                        fw._master_fader.set(mf._raw[ch_idx])
+    def illuminate_solos_from_state(self, s): pass
+    def is_soloed(self):                  return False
+    def apply_gm(self, gm):               pass
+
+
 # ── SubmasterWidget ────────────────────────────────────────────────────────────
 
 class SubmasterWidget(tk.Frame):
@@ -1447,6 +1727,12 @@ class TimingLoggerWidget(tk.Frame):
         self.fixture_solo = _NoSolo()
         self._ch_solos    = {}
 
+        class _SoloStub:
+            soloed = False
+            def set_on(self): pass
+            def reset(self): pass
+        self.solo_btn = _SoloStub()
+
         fnt_big = ("Courier", max(10, int(12 * (sz["master_h"] / 160))), "bold")
         fnt_med = ("Courier", max(8,  int(10 * (sz["master_h"] / 160))))
         fnt_lbl = ("Helvetica", sz["btn_font"])
@@ -1670,6 +1956,12 @@ class ClockWidget(tk.Frame):
             def reset(self): pass
         self.fixture_solo = _NoSolo()
         self._ch_solos    = {}
+
+        class _SoloStub:
+            soloed = False
+            def set_on(self): pass
+            def reset(self): pass
+        self.solo_btn = _SoloStub()
 
         fnt_big  = ("Courier", max(14, int(18 * (sz["master_h"] / 160))), "bold")
         fnt_med  = ("Courier", max(9,  int(11 * (sz["master_h"] / 160))), "bold")
@@ -1986,6 +2278,8 @@ def clear_scene(slot: int):
 
 def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag=None, fade_override=None):
     if slot not in scenes: return
+    import builtins as _b
+    _b._dmx_scene_recalling = True
     scene = scenes[slot]
     fixture_states = scene.get("fixtures", {})  # name → state dict
     fade_time = fade_override if fade_override is not None else scene.get("fade", 0.0)
@@ -2021,20 +2315,39 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
 
     if fade_time <= 0:
         for fw, state in active_pairs:
-            fw.set_state(state)
+            if isinstance(fw, GroupWidget):
+                # Instant recall: set ACT directly, then apply master values
+                act = state.get("_act", True)
+                fw._aligning = True
+                fw.set_state(dict(state))
+                fw._aligning = False
+                fw._set_active(act)
+            else:
+                fw.set_state(state)
         if not dry_run: send_dmx()
+        _b._dmx_scene_recalling = False
         print(f"Scene {slot} recalled (instant).")
         if on_complete: on_complete()
         return
 
+    # Apply GroupWidget ACT state immediately at start of fade
+    group_widgets_in_scene = []
+    for fw, state in active_pairs:
+        if isinstance(fw, GroupWidget):
+            act = state.get("_act", True)
+            fw._set_active(act)  # set directly, bypassing _watch_state
+            group_widgets_in_scene.append(fw)
+
     start_states = [(fw, fw.get_state(), _filter_locked(fw, state))
-                     for fw, state in active_pairs if _filter_locked(fw, state)]
+                     for fw, state in active_pairs if _filter_locked(fw, state)
+                     and not isinstance(fw, GroupWidget)]
     import time as _time_mod
     _fade_start = _time_mod.time()
     _TICK_MS    = 25   # how often to update — wall clock drives actual progress
 
     def _fade_step():
         if stop_flag and stop_flag[0]:
+            _b._dmx_scene_recalling = False
             print(f"Scene {slot} fade interrupted.")
             if on_complete: on_complete()
             return
@@ -2058,10 +2371,25 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
                     sval = start.get(idx_str, start.get(i, fw._raw[i]))
                     interp[idx_str] = int(sval + (tval - sval) * t)
                 fw.set_state(interp)
+        # Sync group master display to track fading members
+        for grp in group_widgets_in_scene:
+            if grp._master_fixture and grp._member_widgets:
+                fw0 = grp._member_widgets[0]
+                if isinstance(fw0, CustomFixture):
+                    mf = grp._master_fixture
+                    for ch_idx in range(len(mf._raw)):
+                        if ch_idx < len(fw0._raw):
+                            mf._raw[ch_idx] = fw0._raw[ch_idx]
+                            if ch_idx == mf._master_idx and mf._master_fader:
+                                mf._master_fader.set(fw0._raw[ch_idx])
+                            fdr = mf._ch_faders.get(ch_idx)
+                            if fdr: fdr.set(fw0._raw[ch_idx])
+
         if not dry_run: send_dmx()
         if t < 1.0:
             root.after(_TICK_MS, _fade_step)
         else:
+            _b._dmx_scene_recalling = False
             print(f"Scene {slot} recalled (fade: {fade_time}s).")
             if on_complete: on_complete()
 
@@ -2610,6 +2938,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
     sbtn("＋ Add Clock",     "#332233", "#cc88ff",  lambda: _add_row("clock"))
     sbtn("＋ Add DMX Grid",      "#222233", "#88ccff",  lambda: _add_row("dmxgrid"))
     sbtn("＋ Add Timing Logger", "#222233", "#cc88ff",  lambda: _add_row("timinglogger"))
+    sbtn("＋ Add Group",         "#332211", "#ffcc44",  lambda: _add_row("group"))
     sbtn("▲ Up",             "#2a2a2a", FGA,        lambda: _move_up())
     sbtn("▼ Down",           "#2a2a2a", FGA,        lambda: _move_down(), sep_after=True)
     sbtn("✕ Delete",         "#442222", "#ff8888",  lambda: _delete_row())
@@ -2772,6 +3101,10 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
             new_row["name"] = "Clock"
         elif ftype == "timinglogger":
             new_row["name"] = "Timing Logger"
+        elif ftype == "group":
+            new_row["name"] = "New Group"
+            new_row["members"] = []
+            new_row["show"] = True
         elif ftype != "divider":
             new_row["name"] = "New Fixture"
             new_row["address"] = max_addr
@@ -2867,15 +3200,16 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         # Row
         row_var = tk.StringVar(value=str(r.get("row", 1)))
         lrow("Row (1 or 2):", lambda p: ttk.Combobox(p, textvariable=row_var,
-              values=["1","2"], state="readonly", font=fnt_s), 5)
+              values=["1","2"], state="readonly", font=fnt_s), 4)
 
         # Colour
-        colour_var = tk.StringVar(value=r.get("colour",""))
+        _colour_val = r.get("outline_colour", r.get("colour", "")) if ftype == "group" else r.get("colour","")
+        colour_var = tk.StringVar(value=_colour_val)
         colour_lbl = tk.Label(d, text="Colour:", bg=BG, fg=FGA, font=fnt_s,
                                width=14, anchor="e")
-        colour_lbl.grid(row=5, column=0, padx=(10,4), pady=5, sticky="e")
+        colour_lbl.grid(row=6, column=0, padx=(10,4), pady=5, sticky="e")
         colour_frame = tk.Frame(d, bg=BG)
-        colour_frame.grid(row=5, column=1, padx=(0,10), pady=5, sticky="ew")
+        colour_frame.grid(row=6, column=1, padx=(0,10), pady=5, sticky="ew")
         colour_e = tk.Entry(colour_frame, textvariable=colour_var,
                             bg=BG2, fg=FG, insertbackground=FG,
                             font=fnt_s, relief=tk.FLAT, bd=3, width=10)
@@ -2896,8 +3230,12 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
 
         def _on_type_change(*_):
             t = type_var.get().lower()
-            is_fixture   = t not in ("divider", "clock", "submaster", "dmxgrid", "timinglogger")
-            is_submaster = t == "submaster"
+            if t == "group":
+                colour_lbl.config(text="Outline colour:")
+            else:
+                colour_lbl.config(text="Colour:")
+            is_fixture   = t not in ("divider", "clock", "submaster", "dmxgrid", "timinglogger", "group")
+            is_submaster = t in ("submaster", "group")
             is_named     = t not in ("divider", "clock")
             name_e.configure(state="normal" if is_named else "disabled")
             if is_named:
@@ -2914,12 +3252,20 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
                 addr_lbl.grid_remove()
                 addr_e.grid_remove()
             # Show/hide targets row
-            if is_submaster:
+            if t == "submaster":
+                targets_lbl.config(text="Targets (comma-separated):")
                 targets_lbl.grid()
                 targets_e.grid()
+                targets_var.set(", ".join(r.get("targets", [])))
+            elif t == "group":
+                targets_lbl.config(text="Members (comma-separated):")
+                targets_lbl.grid()
+                targets_e.grid()
+                targets_var.set(", ".join(r.get("members", [])))
             else:
                 targets_lbl.grid_remove()
                 targets_e.grid_remove()
+                targets_lbl.config(text="Targets (comma-separated):")
         type_var.trace_add("write", _on_type_change)
         _on_type_change()
 
@@ -2927,13 +3273,23 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
             t = type_var.get().lower()
             r["type"] = t
             r["row"]  = int(row_var.get())
-            if t in ("divider", "clock"):
-                for k in ("name","address","colour","targets"): r.pop(k, None)
+            if t in ("divider", "clock", "dmxgrid", "timinglogger", "sequence"):
+                for k in ("address","colour","targets"): r.pop(k, None)
+                if t not in ("divider", "clock"):
+                    r["name"] = name_var.get().strip() or r.get("name", t.title())
             elif t == "submaster":
                 r["name"] = name_var.get().strip() or r.get("name","Sub")
                 targets_raw = targets_var.get()
                 r["targets"] = [x.strip() for x in targets_raw.split(",") if x.strip()]
                 r.pop("address", None)
+            elif t == "group":
+                r["name"] = name_var.get().strip() or r.get("name","Group")
+                r["members"] = [x.strip() for x in targets_var.get().split(",") if x.strip()]
+                r.pop("address", None)
+                col = colour_var.get().strip()
+                if col: r["outline_colour"] = col
+                elif "outline_colour" in r: del r["outline_colour"]
+                r.pop("colour", None)
                 col = colour_var.get().strip()
                 if col: r["colour"] = col
                 elif "colour" in r: del r["colour"]
@@ -2964,13 +3320,14 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
         # Validate
         errors = []
         addr_map = {}
+        non_fixture_types = ("divider", "clock", "dmxgrid", "timinglogger",
+                              "submaster", "group", "sequence")
         for i, r in enumerate(rows):
-            ftype = r.get("type","").lower()
-            if ftype in ("divider","clock","dmxgrid","timinglogger"): continue
+            ftype = r.get("type","").lower().strip()
+            if ftype in non_fixture_types:
+                continue  # no address needed for these
             if not r.get("name"):
                 errors.append(f"Row {i+1}: missing name")
-            if ftype == "submaster":
-                continue  # no address needed
             if not r.get("address"):
                 errors.append(f"Row {i+1}: missing address")
                 continue
@@ -3013,17 +3370,10 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
 
         # Find the fixture def file
         fix_path = fixtures_dir / f"{ftype}.json"
-        is_builtin = not fix_path.exists()
 
-        if is_builtin:
-            # Create from builtin def so user can customise it
-            try:
-                defn = load_fixture_def(ftype)
-                fix_path.write_text(json.dumps(defn, indent=2))
-                status_lbl.config(text=f"Created {ftype}.json from built-in.", fg="#88ffcc")
-            except Exception as e:
-                status_lbl.config(text=f"Error: {e}", fg="#ff8888")
-                return
+        if not fix_path.exists():
+            status_lbl.config(text=f"No definition file found for '{ftype}'.", fg="#ff8888")
+            return
 
         # ── Built-in editor dialog ──
         ed = tk.Toplevel(win)
@@ -3935,8 +4285,20 @@ def build_ui(patch: list, patch_path: Path = None):
 
 
 
+    # Collect all fixture names that belong to a group — skip them in main layout
+    def _build_group_members(p):
+        gm = set()
+        for _gf in p:
+            if _gf.get("type","").lower() == "group":
+                for _m in _gf.get("members", []):
+                    gm.add(_m)
+        return gm
+
+    _group_members = _build_group_members(patch)
+
     regular_defs   = [(f, load_fixture_def(f["type"])) for f in patch
-                      if f.get("type", "").lower() not in ("submaster", "divider", "clock", "dmxgrid", "timinglogger")]
+                      if f.get("type", "").lower() not in ("submaster", "divider", "clock", "dmxgrid", "timinglogger", "group", "sequence")
+                      and f.get("name","") not in _group_members]
     submaster_defs = [f for f in patch if f.get("type", "").lower() == "submaster"]
     # Dividers are rendered inline during rebuild — extract with row info
     divider_entries = [f for f in patch if f.get("type", "").lower() == "divider"]
@@ -3947,7 +4309,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
     def _reload_patch():
         """Re-read patch.json and rebuild the entire fixture panel."""
-        nonlocal regular_defs, submaster_defs, divider_entries
+        nonlocal regular_defs, submaster_defs, divider_entries, _group_members
         _def_cache.clear()  # force fixture defs to reload from disk
         try:
             with open(patch_path) as f:
@@ -3959,11 +4321,14 @@ def build_ui(patch: list, patch_path: Path = None):
         # Update patch in-place so rebuild_fixtures sees the new entries
         patch.clear()
         patch.extend(new_patch)
+        _group_members = _build_group_members(new_patch)
         new_regular = []
-        skip_types = ("submaster", "divider", "clock", "dmxgrid", "timinglogger")
+        skip_types = ("submaster", "divider", "clock", "dmxgrid", "timinglogger", "group", "sequence")
         for fi in new_patch:
             ftype = fi.get("type", "").lower()
             if ftype in skip_types:
+                continue
+            if fi.get("name", "") in _group_members:
                 continue
             try:
                 defn = load_fixture_def(ftype)
@@ -3979,6 +4344,13 @@ def build_ui(patch: list, patch_path: Path = None):
     def rebuild_fixtures(zoom: float):
         states      = [fw.get_state() for fw in all_widgets]
         solo_states = []
+        # Save group states by name (ACT + master fader positions)
+        _group_act_states    = {fw.name: fw._active
+                                for fw in all_widgets
+                                if isinstance(fw, GroupWidget)}
+        _group_master_states = {fw.name: fw.get_state()
+                                for fw in all_widgets
+                                if isinstance(fw, GroupWidget)}
         # Save clock states keyed by name
         clock_states  = {cw.name: cw.get_clock_state()
                          for cw in clock_widgets if isinstance(cw, ClockWidget)}
@@ -4019,6 +4391,9 @@ def build_ui(patch: list, patch_path: Path = None):
         reg_iter = iter(regular_defs)
         for f in patch:
             ftype = f.get("type", "").lower()
+            # Skip fixtures that belong to a group — they're built inside GroupWidget
+            if f.get("name", "") in _group_members:
+                continue
             if ftype == "divider":
                 parent = row_bot if f.get("row", 1) == 2 else row_top
                 div_h = max(20, int(sz["master_h"] * 0.3))
@@ -4066,7 +4441,42 @@ def build_ui(patch: list, patch_path: Path = None):
                 clock_widgets.append(w)
                 # TimingLoggerWidget is not a DMX fixture
 
-            elif ftype not in ("submaster",):
+            elif ftype == "group":
+                # Inherit row from first member, fall back to group's own row field
+                members = f.get("members", [])
+                _first_member_row = 1
+                for _pf in patch:
+                    if _pf.get("name") == (members[0] if members else ""):
+                        _first_member_row = _pf.get("row", 1)
+                        break
+                _group_row = f.get("row", _first_member_row)
+                parent = row_bot if _group_row == 2 else row_top
+                # Build member_defs list for this group
+                grp_defs = []
+                for mname in members:
+                    for pf in patch:
+                        if pf.get("name") == mname and pf.get("type","").lower() not in (
+                                "submaster","divider","clock","dmxgrid",
+                                "timinglogger","group","sequence"):
+                            try:
+                                mdefn = load_fixture_def(pf["type"])
+                                grp_defs.append((pf, mdefn))
+                            except Exception as e:
+                                print(f"Group {f.get('name')}: can't load member {mname}: {e}")
+                            break
+                _outline = f.get("outline_colour", "#1e1e2e")
+                w = GroupWidget(parent, name=f.get("name", "Group"),
+                                members=members,
+                                member_defs=grp_defs,
+                                sz=sz, gm_var=gm_var,
+                                root_ref=root,
+                                outline_colour=_outline)
+                w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
+                # Also add member widgets to all_widgets for scene/OSC access
+                all_widgets.extend(w._member_widgets)
+                all_widgets.append(w)
+
+            elif ftype not in ("submaster", "sequence"):
                 try:
                     f2, defn = next(reg_iter)
                 except StopIteration:
@@ -4131,6 +4541,11 @@ def build_ui(patch: list, patch_path: Path = None):
                     if ss.get("main"): fw.solo_btn.set_on()
 
         root.after(50, lambda: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        # Restore group states by name (more reliable than index-based)
+        for fw in all_widgets:
+            if isinstance(fw, GroupWidget) and fw.name in _group_master_states:
+                fw.set_state(_group_master_states[fw.name])
 
     fixture_frame.bind("<Configure>",
                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -4247,12 +4662,17 @@ def build_ui(patch: list, patch_path: Path = None):
         def get_channels(fname):
             """Return list of channel label strings for a fixture."""
             for fw in all_widgets:
-                if fw.name == fname and isinstance(fw, CustomFixture):
+                if fw.name != fname: continue
+                if isinstance(fw, GroupWidget):
+                    members = fw._members_resolved()
+                    if members and isinstance(members[0], CustomFixture):
+                        return get_channels(members[0].name)
+                    return ["Master"]
+                if isinstance(fw, CustomFixture):
                     chans = []
                     if fw._master_idx is not None:
                         chans.append("Master")
                     for orig_idx, ch_def in fw._visible:
-                        # ch_def is a dict like {"label": "R", ...}
                         lbl = ch_def.get("label", str(orig_idx)) if isinstance(ch_def, dict) else str(ch_def)
                         chans.append(lbl)
                     return chans if chans else ["Master"]
@@ -5192,6 +5612,35 @@ def build_ui(patch: list, patch_path: Path = None):
                         else:
                             fname, chan_label = key, "Master"
                         fw = by_name.get(fname)
+                        # If it's a group, propagate to all members
+                        if fw and isinstance(fw, GroupWidget):
+                            for mfw in fw._members_resolved():
+                                if isinstance(mfw, CustomFixture):
+                                    # Find channel on member
+                                    tidx = None
+                                    if chan_label in (None, "Master") and mfw._master_idx is not None:
+                                        tidx = mfw._master_idx
+                                    else:
+                                        for oi, cd in mfw._visible:
+                                            lbl = cd.get("label","") if isinstance(cd,dict) else str(cd)
+                                            if lbl == chan_label:
+                                                tidx = oi; break
+                                    if tidx is None: continue
+                                    raw_val = max(0, min(255, int(val)))
+                                    if fade <= 0:
+                                        mfw.set_state({tidx: raw_val})
+                                    else:
+                                        ss = dict(mfw.get_state())
+                                        def _gfade(mfw=mfw, s=ss, t={tidx:raw_val},
+                                                    t0=_ch_start, dur=fade):
+                                            el = _tm.time()-t0
+                                            tt = min(1.0, el/dur)
+                                            mfw.set_state({k:int(s.get(k,0)+(v-s.get(k,0))*tt)
+                                                           for k,v in t.items()})
+                                            if tt<1.0 and not _seq_stop_flag[0]:
+                                                root.after(25, _gfade)
+                                        _gfade()
+                            continue
                         if not fw or not isinstance(fw, CustomFixture): continue
                         # Find channel index
                         idx = None
@@ -5563,7 +6012,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
     def _do_go(slot):
         # Always allow GO on the currently running sequence slot
-        if _seq_running[0] and _seq_slot[0] == slot:
+        if (_seq_running[0] or _seq_waiting[0]) and _seq_slot[0] == slot:
             _seq_go()
             return
         if _scene_fade_active[0]: return
@@ -5769,19 +6218,27 @@ def build_ui(patch: list, patch_path: Path = None):
         tgt_name   = scene_names.pop(tgt, None)
         src_colour = scene_colours.pop(src, None)
         tgt_colour = scene_colours.pop(tgt, None)
-        # src_scene moves to tgt slot, carrying src_name
+
+        # Strip default "Scene N" names so they regenerate at new position
+        def _is_default_name(slot, name):
+            return name is None or name == f"Scene {slot}"
+
+        # src_scene moves to tgt slot
         if src_scene:
             scenes[tgt] = src_scene
-            if src_name: scenes[tgt]["name"] = src_name
-            else:        scenes[tgt].pop("name", None)
-        # tgt_scene moves to src slot, carrying tgt_name
+            if not _is_default_name(src, src_name):
+                scenes[tgt]["name"] = src_name
+                scene_names[tgt]    = src_name
+            else:
+                scenes[tgt].pop("name", None)
+        # tgt_scene moves to src slot
         if tgt_scene:
             scenes[src] = tgt_scene
-            if tgt_name: scenes[src]["name"] = tgt_name
-            else:        scenes[src].pop("name", None)
-        # Update scene_names and colours to match
-        if src_name:   scene_names[tgt]   = src_name
-        if tgt_name:   scene_names[src]   = tgt_name
+            if not _is_default_name(tgt, tgt_name):
+                scenes[src]["name"] = tgt_name
+                scene_names[src]    = tgt_name
+            else:
+                scenes[src].pop("name", None)
         if src_colour: scene_colours[tgt] = src_colour
         if tgt_colour: scene_colours[src] = tgt_colour
 
