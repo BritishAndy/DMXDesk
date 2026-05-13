@@ -1,0 +1,347 @@
+{
+  "channels": [
+    {
+      "label": "Pan",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true,
+      "role": "pan"
+    },
+    {
+      "label": "Pan Fine",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": false
+    },
+    {
+      "label": "Tilt",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true,
+      "role": "tilt"
+    },
+    {
+      "label": "Tilt Fine",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": false
+    },
+    {
+      "label": "PT Speed",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Spot Dim",
+      "master": true,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Spot Strobe",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-10": "Off",
+        "11-255": "Strobe Spd"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Colour",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-4": "White",
+        "5-9": "Wh+Red",
+        "10-14": "Red",
+        "15-19": "Re+Grn",
+        "20-24": "Green",
+        "25-29": "Grn+Blu",
+        "30-34": "Blue",
+        "35-39": "Blu+Yel",
+        "40-44": "Yellow",
+        "45-49": "Yel+Org",
+        "50-54": "Orange",
+        "55-59": "Org+LBlu",
+        "60-64": "Lt Blue",
+        "65-69": "LBlu+Mag",
+        "70-74": "Magenta",
+        "75-79": "Mag+Wh",
+        "80-167": "Fwd Rainbow",
+        "168-255": "Bwd Rainbow"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Static Gobo",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-9": "Open",
+        "10-19": "Gobo 1",
+        "20-29": "Gobo 2",
+        "30-39": "Gobo 3",
+        "40-49": "Gobo 4",
+        "50-59": "Gobo 5",
+        "60-69": "Gobo 6",
+        "70-79": "Gobo 7",
+        "80-89": "Shake 1",
+        "90-99": "Shake 2",
+        "100-109": "Shake 3",
+        "110-119": "Shake 4",
+        "120-129": "Shake 5",
+        "130-139": "Shake 6",
+        "140-149": "Shake 7",
+        "150-202": "Wheel Bwd",
+        "203-255": "Wheel Fwd"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Rot Gobo",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-9": "Open",
+        "10-19": "Gobo 1",
+        "20-29": "Gobo 2",
+        "30-39": "Gobo 3",
+        "40-49": "Gobo 4",
+        "50-59": "Gobo 5",
+        "60-69": "Gobo 6",
+        "70-79": "Shake 1",
+        "80-89": "Shake 2",
+        "90-99": "Shake 3",
+        "100-109": "Shake 4",
+        "110-119": "Shake 5",
+        "120-129": "Shake 6",
+        "130-192": "Wheel Bwd",
+        "193-255": "Wheel Fwd"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Gobo Rot",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": "Index",
+        "128-190": "Fwd Rot",
+        "191-192": "Stop",
+        "193-255": "Bwd Rot"
+      },
+      "unit": "named",
+      "show": true
+    },
+    {
+      "label": "Focus",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Prism",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-127": "Off",
+        "128-136": "3-Facet",
+        "137-255": "Prism Rot"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Spot Prog",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-5": "Off",
+        "6-55": "Prog 1",
+        "56-105": "Prog 2",
+        "106-155": "Prog 3",
+        "156-205": "Prog 4",
+        "206-255": "Random"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Wash Dim",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Wash Strobe",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-10": "Off",
+        "11-255": "Strobe Spd"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "R",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "G",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "B",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "W",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "A",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "UV",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Wash Prog",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-49": "Off",
+        "50-99": "Col Prog 1",
+        "100-149": "Col Prog 2",
+        "150-199": "Col Prog 3",
+        "200-249": "Col Prog 4",
+        "250-255": "Col Prog 5"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Prog Spd",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Reset",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-25": "Off",
+        "26-76": "Reset Others",
+        "77-127": "Reset PT",
+        "128-255": "Reset All"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    }
+  ]
+}

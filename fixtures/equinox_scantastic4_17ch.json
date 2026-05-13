@@ -1,0 +1,25 @@
+{
+  "channels": [
+    {"label": "Blackout",    "master": true,  "default": 0,
+     "range": {"0-127":"Blackout","128-255":"Full On"},
+     "unit": "named", "show": true, "jump": true},
+    {"label": "Strobe",      "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true, "jump": true},
+    {"label": "Col/Pat 1",   "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Col/Pat 2",   "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Auto Scroll", "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Scroll Spd",  "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "1 Pan",       "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "1 Tilt",      "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "2 Pan",       "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "2 Tilt",      "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "3 Pan",       "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "3 Tilt",      "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "4 Pan",       "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "4 Tilt",      "master": false, "default": 128, "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Move Macro",  "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Scan Speed",  "master": false, "default": 0,   "range": [0, 255], "unit": "raw", "show": true},
+    {"label": "Sound",       "master": false, "default": 0,
+     "range": {"0-127":"Off","128-255":"Sound Active"},
+     "unit": "named", "show": true, "jump": true}
+  ]
+}

@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 197
+BUILD   = 224
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -270,75 +270,49 @@ def btn(parent, text, bg, fg, command=None, **kw):
     return MacButton(parent, text=text, bg=bg, fg=fg, command=command,
                      activebackground=_darken(bg), activeforeground=fg, **kw)
 
-# ── SoloButton ─────────────────────────────────────────────────────────────────
+# ── LockButton ─────────────────────────────────────────────────────────────────
 
 SOLO_OFF_BG  = "#333333"; SOLO_OFF_FG  = "#666666"
-SOLO_ON_BG   = "#ddaa00"; SOLO_ON_FG   = "#000000"
 SOLO_LOCK_BG = "#880000"; SOLO_LOCK_FG = "#ffffff"
 
 class SoloButton(tk.Label):
-    """Three-state button: off → solo (amber) → locked (red) → off.
-    Locked channels are excluded from scene recalls."""
+    """Simple two-state lock button — locks a channel from scene recalls.
+    Only shown on fixtures with "lockable": true in their definition.
+    Named SoloButton for compatibility with existing code."""
 
     def __init__(self, parent, **kw):
-        self._soloed = False
         self._locked = False
+        self._soloed = False  # always False — solos removed
         self._command = None
-        super().__init__(parent, text="S", bg=SOLO_OFF_BG, fg=SOLO_OFF_FG,
-                         font=("Helvetica", 6, "bold"), cursor="hand2",
+        super().__init__(parent, text="🔒", bg=SOLO_OFF_BG, fg=SOLO_OFF_FG,
+                         font=("Helvetica", 6), cursor="hand2",
                          padx=1, pady=1, **kw)
         self.bind("<ButtonRelease-1>", self._on_release)
 
     def _on_release(self, _=None):
-        if not self._soloed and not self._locked:
-            # off → solo
-            self._soloed = True
+        if self._locked:
             self._locked = False
-            self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
-        elif self._soloed and not self._locked:
-            # solo → locked
-            self._soloed = False
+            self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
+        else:
             self._locked = True
             self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
-        else:
-            # locked → off
-            self._soloed = False
-            self._locked = False
-            self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
         if self._command: self._command()
 
-    def _update_display(self):
-        if self._locked:
-            self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
-        elif self._soloed:
-            self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
-        else:
-            self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
-
     @property
-    def soloed(self): return self._soloed
+    def soloed(self): return False  # solos removed
 
     @property
     def locked(self): return self._locked
 
-    def reset(self):
-        """Clear solo only — preserve lock."""
-        self._soloed = False
-        self._update_display()
+    def reset(self): pass  # no-op — lock not cleared by clear-solos
 
     def unlock(self):
-        """Clear lock and solo."""
-        self._soloed = False
         self._locked = False
-        self._update_display()
+        self.config(bg=SOLO_OFF_BG, fg=SOLO_OFF_FG)
 
-    def set_on(self):
-        self._soloed = True
-        self._locked = False
-        self.config(bg=SOLO_ON_BG, fg=SOLO_ON_FG)
+    def set_on(self): pass  # no-op — solos removed
 
     def lock(self):
-        self._soloed = False
         self._locked = True
         self.config(bg=SOLO_LOCK_BG, fg=SOLO_LOCK_FG)
 
@@ -400,34 +374,29 @@ class CustomFixture(tk.Frame):
         self._raw = [ch.get("default", lo_hi[i][0]) for i, ch in enumerate(channel_defs)]
         self._pre_bump = 0  # stores master value before a bump
 
+        # Lockable if any channel has __lockable__ flag (set by load_fixture_def)
+        self._lockable = any(ch.get("__lockable__") for ch in channel_defs)
+        # Jump channels — snap to end value instantly during fades
+        self._jump_indices = {i for i, ch in enumerate(channel_defs) if ch.get("jump")}
+        # Pan/tilt roles for XY pad
+        self._pan_idx  = next((i for i, ch in enumerate(channel_defs) if ch.get("role") == "pan"),  None)
+        self._tilt_idx = next((i for i, ch in enumerate(channel_defs) if ch.get("role") == "tilt"), None)
+        self._has_xy   = self._pan_idx is not None and self._tilt_idx is not None
+
         # ── Header: name + (if not compact) fixture-level solo ──
         header = tk.Frame(self, bg=bg)
         header.pack(fill=tk.X)
         tk.Label(header, text=name, bg=bg, fg="#ffffff",
                  font=("Helvetica", sz["name_font"], "bold"),
                  wraplength=sz["wrap"]).pack(side=tk.LEFT)
-        self.fixture_solo = SoloButton(header)
-        self.fixture_solo.config(text="Solo fix", font=("Helvetica", 7, "bold"),
-                                  padx=3, pady=2)
-        _total_shown = (1 if self._master_idx is not None else 0) + len(self._visible)
-        if _total_shown > 1:
-            self.fixture_solo.pack(side=tk.RIGHT)
 
-        # Override Solo fix toggle to sync all channel solos
-        def _fixture_solo_release(e=None):
-            currently = self.fixture_solo.soloed
-            if currently:
-                # Turning off — reset all channel solos
-                self.fixture_solo.reset()
-                for sb in self._ch_solos.values():
-                    sb.reset()
-            else:
-                # Turning on — set all channel solos
-                self.fixture_solo.set_on()
-                for sb in self._ch_solos.values():
-                    sb.set_on()
-        self.fixture_solo.unbind("<ButtonRelease-1>")
-        self.fixture_solo.bind("<ButtonRelease-1>", _fixture_solo_release)
+        # Stub for backward compatibility — no solo button
+        class _NoSolo:
+            soloed = False; locked = False
+            def reset(self): pass
+            def unlock(self): pass
+            def set_on(self): pass
+        self.fixture_solo = _NoSolo()
 
         # Pre-scan for colour channels so swatch can be placed beside master fader
         self._swatch_indices = {}
@@ -452,7 +421,8 @@ class CustomFixture(tk.Frame):
             master_col = tk.Frame(master_row, bg=bg)
             master_col.pack(side=tk.LEFT)
             master_solo = SoloButton(master_col)
-            master_solo.pack()
+            if self._lockable:
+                master_solo.pack()
             self._ch_solos[self._master_idx] = master_solo
             tk.Label(master_col, text=mch["label"], bg=bg, fg="#aaaaaa",
                      font=("Helvetica", sz["btn_font"])).pack()
@@ -532,7 +502,8 @@ class CustomFixture(tk.Frame):
             col = tk.Frame(parent, bg=bg)
             col.pack(side=tk.LEFT, padx=2)
             sb = SoloButton(col)
-            sb.pack()
+            if self._lockable:
+                sb.pack()
             self._ch_solos[orig_idx] = sb
             ch_col = _CH_COLOURS.get(ch["label"], "#aaaaaa")
             h = sz["ch_h"] if not small else max(20, int(sz["master_h"] * 0.75))
@@ -641,8 +612,14 @@ class CustomFixture(tk.Frame):
         if _colour:
             col_frame = tk.Frame(self, bg=bg)
             col_frame.pack(pady=(4, 0))
+            # XY pad goes first in the colour row if this fixture has pan/tilt
+            if self._has_xy:
+                self._build_xy_pad(sz, bg, parent=col_frame)
             for orig_idx, ch in _colour:
                 _build_ch_col(col_frame, orig_idx, ch, small=False)
+        elif self._has_xy:
+            # No colour channels — XY pad gets its own row
+            self._build_xy_pad(sz, bg)
 
         # No master but has RGB — place a horizontal swatch below the sub-channels
         if _has_swatch and self._master_idx is None:
@@ -679,6 +656,88 @@ class CustomFixture(tk.Frame):
 
     # ── Internal fader callback ────────────────────────────────────────────────
 
+    def _build_xy_pad(self, sz, bg, parent=None):
+        """Build a 2D XY joystick pad for pan/tilt control."""
+        pad_size = max(80, sz["master_h"])
+        self._xy_size = pad_size
+        container = parent if parent is not None else self
+
+        outer = tk.Frame(container, bg=bg)
+        outer.pack(side=tk.LEFT if parent else tk.TOP,
+                   padx=(0, 4) if parent else 0,
+                   pady=(4, 0) if not parent else 0,
+                   anchor="n")
+
+        # Labels
+        lbl_row = tk.Frame(outer, bg=bg)
+        lbl_row.pack(fill=tk.X)
+        tk.Label(lbl_row, text="◀ Pan ▶", bg=bg, fg="#888888",
+                 font=("Helvetica", max(6, sz["ch_font"]))).pack(side=tk.LEFT, padx=2)
+        tk.Label(lbl_row, text="▲T▼", bg=bg, fg="#888888",
+                 font=("Helvetica", max(6, sz["ch_font"]))).pack(side=tk.RIGHT, padx=2)
+
+        self._xy_canvas = tk.Canvas(outer, width=pad_size, height=pad_size,
+                                     bg="#1a1a1a", highlightthickness=1,
+                                     highlightbackground="#444444",
+                                     cursor="crosshair")
+        self._xy_canvas.pack()
+
+        # Draw grid lines
+        mid = pad_size // 2
+        self._xy_canvas.create_line(mid, 0, mid, pad_size, fill="#333333", dash=(2,4))
+        self._xy_canvas.create_line(0, mid, pad_size, mid, fill="#333333", dash=(2,4))
+
+        # Dot marker
+        self._xy_dot = self._xy_canvas.create_oval(mid-5, mid-5, mid+5, mid+5,
+                                                     fill="#44aaff", outline="#88ccff",
+                                                     width=1)
+
+        # Bind mouse events
+        self._xy_canvas.bind("<ButtonPress-1>",   self._xy_press)
+        self._xy_canvas.bind("<B1-Motion>",        self._xy_drag)
+        self._xy_canvas.bind("<ButtonRelease-1>",  self._xy_drag)  # final position on release
+
+        self._update_xy_pad()
+
+    def _update_xy_pad(self):
+        """Move the dot on the XY pad to reflect current pan/tilt values."""
+        if not hasattr(self, "_xy_canvas"): return
+        pan_raw  = self._raw[self._pan_idx]  if self._pan_idx  is not None else 128
+        tilt_raw = self._raw[self._tilt_idx] if self._tilt_idx is not None else 128
+        s = self._xy_size
+        x = int(pan_raw  / 255 * (s - 4)) + 2
+        y = int(tilt_raw / 255 * (s - 4)) + 2
+        r = 5
+        self._xy_canvas.coords(self._xy_dot, x-r, y-r, x+r, y+r)
+
+    def _xy_press(self, e):
+        self._xy_apply(e.x, e.y)
+
+    def _xy_drag(self, e):
+        self._xy_apply(e.x, e.y)
+
+    def _xy_apply(self, x, y):
+        s = self._xy_size
+        pan_raw  = max(0, min(255, int((x - 2) / (s - 4) * 255)))
+        tilt_raw = max(0, min(255, int((y - 2) / (s - 4) * 255)))
+        if self._pan_idx is not None:
+            self._raw[self._pan_idx] = pan_raw
+            fdr = self._ch_faders.get(self._pan_idx)
+            if fdr: fdr.set(pan_raw)
+            if self._pan_idx in self._ch_vallabels:
+                self._ch_vallabels[self._pan_idx].config(text=self._fmt(self._pan_idx))
+        if self._tilt_idx is not None:
+            self._raw[self._tilt_idx] = tilt_raw
+            fdr = self._ch_faders.get(self._tilt_idx)
+            if fdr: fdr.set(tilt_raw)
+            if self._tilt_idx in self._ch_vallabels:
+                self._ch_vallabels[self._tilt_idx].config(text=self._fmt(self._tilt_idx))
+        self._update_xy_pad()
+        self._push()
+        # Notify programmer
+        if hasattr(self, "_programmer_cb") and self._programmer_cb:
+            self._programmer_cb(self)
+
     def _update_swatch(self):
         """Recolour the swatch canvas to reflect current R/G/B/W/A/UV mix."""
         if not self._swatch: return
@@ -711,7 +770,8 @@ class CustomFixture(tk.Frame):
             self._swatch.configure(bg=colour)
 
     # Set this to a callable(fixture, value) to receive master fader moves
-    on_master_moved = None
+    on_master_moved = None   # callback(fw, val) when master fader moves
+    on_any_moved    = None   # callback(fw, ch_idx, val) for any channel
 
     def _on_fader(self, ch_idx: int, val):
         self._raw[ch_idx] = int(float(val))
@@ -729,7 +789,12 @@ class CustomFixture(tk.Frame):
             self._ch_vallabels[ch_idx].config(text=self._fmt(ch_idx))
         if self._swatch and ch_idx in self._swatch_indices.values():
             self._update_swatch()
+        if self._has_xy and ch_idx in (self._pan_idx, self._tilt_idx):
+            self._update_xy_pad()
         self._push()
+        # Notify group selection of any channel change
+        if self.on_any_moved:
+            self.on_any_moved(self, ch_idx, int(float(val)))
 
     def set_master_value(self, val: int):
         """Directly set the master fader value without triggering on_master_moved."""
@@ -801,8 +866,7 @@ class CustomFixture(tk.Frame):
     # ── Solo queries ──────────────────────────────────────────────────────────
 
     def is_soloed(self) -> bool:
-        if self.fixture_solo.soloed: return True
-        return any(sb.soloed for sb in self._ch_solos.values())
+        return False  # solos removed
 
     def _locked_channel_indices(self) -> set:
         """Return set of orig channel indices that are locked (excluded from recall)."""
@@ -814,22 +878,14 @@ class CustomFixture(tk.Frame):
         return {i for i, sb in self._ch_solos.items() if sb.locked}
 
     def any_locked(self):
-        return self.fixture_solo.locked or any(sb.locked for sb in self._ch_solos.values())
+        return any(sb.locked for sb in self._ch_solos.values())
 
     def clear_locks(self):
-        self.fixture_solo.unlock()
         for sb in self._ch_solos.values():
             sb.unlock()
 
     def _soloed_channel_indices(self) -> set:
-        """Return set of orig channel indices that are soloed.
-        Fixture solo = all channels. Individual ch_solos (incl. master) are explicit."""
-        if self.fixture_solo.soloed:
-            s = set()
-            if self._master_idx is not None: s.add(self._master_idx)
-            for i, _ in self._visible: s.add(i)
-            return s
-        return {i for i, sb in self._ch_solos.items() if sb.soloed}
+        return set()  # solos removed
 
     # ── State get/set ─────────────────────────────────────────────────────────
 
@@ -843,11 +899,7 @@ class CustomFixture(tk.Frame):
         return vals
 
     def get_soloed_state(self):
-        """Partial state for soloed channels only, or {} if nothing soloed."""
-        soloed = self._soloed_channel_indices()
-        if not soloed:
-            return {}
-        return {i: self._raw[i] for i in soloed}
+        return {}  # solos removed
 
     def set_state(self, state: dict):
         for idx_str, val in state.items():
@@ -865,23 +917,37 @@ class CustomFixture(tk.Frame):
                         text=named_label(self.channel_defs[i], int(val)))
         self._update_swatch()
         self._push()
+        if self._has_xy:
+            self._update_xy_pad()
+
+    def snap_channels(self, state: dict):
+        """Set channel values instantly to DMX without Scale widget animation.
+        Used for jump channels that must snap without any visual interpolation."""
+        for idx_str, val in state.items():
+            i = int(idx_str)
+            if val is None: continue
+            v = int(val)
+            self._raw[i] = v
+            # Update display labels directly — don't call Scale.set() to avoid animation
+            if i == self._master_idx:
+                if self._master_val:
+                    self._master_val.config(text=self._fmt(i))
+                if self._master_fader:
+                    self._master_fader.set(v)
+            elif i in self._ch_faders:
+                if i in self._ch_namelabels:
+                    self._ch_namelabels[i].config(
+                        text=named_label(self.channel_defs[i], v))
+                if i in self._ch_vallabels:
+                    self._ch_vallabels[i].config(text=self._fmt(i))
+                self._ch_faders[i].set(v)
+        self._update_swatch()
+        # Push directly to DMX bypassing GM scaling for jump channels
+        self._push()
 
     def illuminate_solos_from_state(self, state):
-        """Light solo buttons to reflect which channels are stored in the scene."""
-        self.fixture_solo.reset()
-        for sb in self._ch_solos.values(): sb.reset()
-        if state is None:
-            return
-        stored = {int(k) for k in state}
-        for i in stored:
-            if i in self._ch_solos:
-                self._ch_solos[i].set_on()
-        # Light fixture solo if all visible+master channels are stored
-        all_ch = set()
-        if self._master_idx is not None: all_ch.add(self._master_idx)
-        for i, _ in self._visible: all_ch.add(i)
-        if all_ch and all_ch <= stored:
-            self.fixture_solo.set_on()
+        pass  # solos removed
+        pass  # solos removed
 
     def fixture_type_key(self) -> tuple:
         """A hashable key identifying this fixture type — used to match copy/paste targets."""
@@ -988,28 +1054,13 @@ class DigitalFixture(tk.Frame):
         tk.Label(header, text=name, bg=bg, fg="#ffffff",
                  font=fnt_hdr, anchor="w").pack(side=tk.LEFT)
 
-        # Solo fix button
-        self.fixture_solo = SoloButton(header)
-        self.fixture_solo.config(text="Solo fix", font=("Helvetica", 7, "bold"),
-                                  padx=3, pady=2)
-        if len(self._visible) > 0:
-            self.fixture_solo.pack(side=tk.RIGHT)
-
-        def _fixture_solo_release(e=None):
-            if self.fixture_solo.soloed:
-                self.fixture_solo.reset()
-                for i in self._solos:
-                    self._solos[i] = False
-                for sb in self._solo_btns.values():
-                    sb.reset()
-            else:
-                self.fixture_solo.set_on()
-                for i in self._solos:
-                    self._solos[i] = True
-                for sb in self._solo_btns.values():
-                    sb.set_on()
-        self.fixture_solo.unbind("<ButtonRelease-1>")
-        self.fixture_solo.bind("<ButtonRelease-1>", _fixture_solo_release)
+        # Solo stub for compatibility
+        class _NoSolo:
+            soloed = False; locked = False
+            def reset(self): pass
+            def unlock(self): pass
+            def set_on(self): pass
+        self.fixture_solo = _NoSolo()
 
         # Channel buttons
         btn_frame = tk.Frame(self, bg=bg)
@@ -1048,7 +1099,8 @@ class DigitalFixture(tk.Frame):
                 col = tk.Frame(btn_frame, bg=bg)
                 col.pack(side=tk.LEFT, padx=4)
                 sb = SoloButton(col)
-                sb.pack()
+                if hasattr(self, "_lockable") and self._lockable:
+                    sb.pack()
                 b = MacButton(col, text=label,
                               bg="#333333", fg="#888888",
                               font=fnt_btn, width=btn_w, pady=4,
@@ -1309,10 +1361,13 @@ class GroupWidget(tk.Frame):
         for patch_entry, defn in self._member_defs:
             try:
                 colour = patch_entry.get("colour", "#2b2b2b")
+                _channels = defn["channels"]
+                if defn.get("lockable"):
+                    _channels = [dict(c, **{"__lockable__": True}) for c in _channels]
                 w = CustomFixture(self._mpanel,
                                   patch_entry["name"],
                                   patch_entry["address"],
-                                  defn["channels"],
+                                  _channels,
                                   sz=self._sz,
                                   colour=colour)
                 w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
@@ -2251,22 +2306,13 @@ def load_scenes_from_disk(all_widget_names: list = None):
     except Exception as e:
         print(f"Error loading scenes: {e}")
 
-def any_soloed(all_widgets): return any(fw.is_soloed() for fw in all_widgets)
+def any_soloed(all_widgets): return False  # solos removed
 
 def store_scene(slot: int, all_widgets: list, fade_time: float = 0.0):
     """Store scene keyed by fixture name so patch reordering doesn't break recall."""
     existing_name = scenes.get(slot, {}).get("name")
-    if any_soloed(all_widgets):
-        new_fixtures = {}
-        for fw in all_widgets:
-            s = fw.get_soloed_state()
-            if s:
-                new_fixtures[fw.name] = s
-            # Non-soloed fixtures simply absent from the dict
-        print(f"Scene {slot} stored (partial, fade: {fade_time}s).")
-    else:
-        new_fixtures = {fw.name: fw.get_state() for fw in all_widgets}
-        print(f"Scene {slot} stored (full, fade: {fade_time}s).")
+    new_fixtures = {fw.name: fw.get_state() for fw in all_widgets}
+    print(f"Scene {slot} stored (full, fade: {fade_time}s).")
     scenes[slot] = {"fade": fade_time, "fixtures": new_fixtures}
     if existing_name: scenes[slot]["name"] = existing_name
     save_scenes_to_disk()
@@ -2286,18 +2332,6 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
 
     # Build a name→widget lookup
     by_name = {fw.name: fw for fw in all_widgets}
-
-    # Determine if partial (some fixtures absent from scene)
-    all_names = {fw.name for fw in all_widgets}
-    is_partial = not all_names <= set(fixture_states.keys())
-
-    # Illuminate solos
-    for fw in all_widgets:
-        state = fixture_states.get(fw.name)
-        if is_partial:
-            fw.illuminate_solos_from_state(state)
-        else:
-            fw.illuminate_solos_from_state(None)
 
     # Only apply to widgets present in this scene
     # Filter out locked channels from each fixture's state
@@ -2338,7 +2372,43 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
             fw._set_active(act)  # set directly, bypassing _watch_state
             group_widgets_in_scene.append(fw)
 
-    start_states = [(fw, fw.get_state(), _filter_locked(fw, state))
+    # Split jump channels into snap-at-start vs snap-at-end based on master direction
+    # snap-at-start: master going up (or no master) — set mode before light rises
+    # snap-at-end:   master going to zero — set mode after light fades out
+    _snap_start = {}  # {fw: {ch_idx: val}}
+    _snap_end   = {}  # {fw: {ch_idx: val}}
+
+    for fw, state in active_pairs:
+        if not isinstance(fw, CustomFixture): continue
+        jump_idx = getattr(fw, "_jump_indices", set())
+        if not jump_idx: continue
+        jump_state = {k: v for k, v in state.items()
+                      if int(k) in jump_idx}
+        if not jump_state: continue
+        # Determine master direction for this fixture
+        master_target  = state.get(fw._master_idx) if fw._master_idx is not None else None
+        master_current = fw._raw[fw._master_idx]   if fw._master_idx is not None else None
+        if master_target is not None and master_target == 0:
+            # Fading to black — snap after fade
+            _snap_end[fw] = jump_state
+        else:
+            # Fading up or no master — snap before fade
+            _snap_start[fw] = jump_state
+
+    # Apply snap-at-start immediately
+    for fw, jump_state in _snap_start.items():
+        fw.snap_channels(jump_state)
+
+    # Build start states excluding ALL jump channels from interpolation
+    def _non_jump_state(fw, state):
+        """Return state with jump channels removed — handles both int and str keys."""
+        jump_idx = getattr(fw, "_jump_indices", set())
+        if not jump_idx: return state
+        return {k: v for k, v in state.items()
+                if int(k) not in jump_idx}
+
+    start_states = [(fw, _non_jump_state(fw, fw.get_state()),
+                     _non_jump_state(fw, _filter_locked(fw, state)))
                      for fw, state in active_pairs if _filter_locked(fw, state)
                      and not isinstance(fw, GroupWidget)]
     import time as _time_mod
@@ -2348,6 +2418,9 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
     def _fade_step():
         if stop_flag and stop_flag[0]:
             _b._dmx_scene_recalling = False
+            # Apply snap-at-end jump channels even on interrupt
+            for fw, jump_state in _snap_end.items():
+                fw.snap_channels(jump_state)
             print(f"Scene {slot} fade interrupted.")
             if on_complete: on_complete()
             return
@@ -2390,6 +2463,9 @@ def recall_scene(slot: int, all_widgets: list, root, on_complete=None, stop_flag
             root.after(_TICK_MS, _fade_step)
         else:
             _b._dmx_scene_recalling = False
+            # Apply snap-at-end jump channels (mode changes after fade to black)
+            for fw, jump_state in _snap_end.items():
+                fw.snap_channels(jump_state)
             print(f"Scene {slot} recalled (fade: {fade_time}s).")
             if on_complete: on_complete()
 
@@ -4202,25 +4278,56 @@ def build_ui(patch: list, patch_path: Path = None):
         for fw in group_selected:
             fw.set_group_highlight(False)
             fw.on_master_moved = None
+            fw.on_any_moved    = None
         group_selected.clear()
 
-    def _on_group_master_moved(source_fw, val):
-        """Called when any grouped fixture's master moves — sync all others."""
+    def _on_group_any_moved(source_fw, ch_idx, val):
+        """Called when any channel on a grouped fixture moves — sync same channel on all others."""
         for fw in group_selected:
-            if fw is not source_fw and fw._master_idx is not None:
-                fw.set_master_value(val)
+            if fw is source_fw: continue
+            # Only sync if fixture has this channel index
+            if ch_idx >= len(fw._raw): continue
+            fw._raw[ch_idx] = int(float(val))
+            # Update fader position
+            fdr = fw._ch_faders.get(ch_idx)
+            if fdr is not None:
+                fdr.set(int(float(val)))
+            if ch_idx == fw._master_idx:
+                if fw._master_fader: fw._master_fader.set(int(float(val)))
+                if fw._master_val:   fw._master_val.config(text=fw._fmt(ch_idx))
+            if ch_idx in fw._ch_vallabels:
+                fw._ch_vallabels[ch_idx].config(text=fw._fmt(ch_idx))
+            if fw._swatch and ch_idx in fw._swatch_indices.values():
+                fw._update_swatch()
+            fw._push()
+            _programmer_update(fw)
 
-    def _fade_fixture_to(fw, target_val, steps=40, interval_ms=25, on_done=None):
-        """Smoothly fade a fixture's master to target_val without triggering group sync."""
-        if fw._master_idx is None:
-            if on_done: on_done()
-            return
-        start_val = fw._raw[fw._master_idx]
-        step_ref  = [0]
+    def _on_group_master_moved(source_fw, val):
+        """Legacy — kept for compatibility, delegates to _on_group_any_moved."""
+        if source_fw._master_idx is not None:
+            _on_group_any_moved(source_fw, source_fw._master_idx, val)
+
+    def _fade_fixture_to_state(fw, target_state, steps=40, interval_ms=25, on_done=None):
+        """Smoothly fade all channels of fw to target_state without triggering group sync."""
+        start_state = {idx: fw._raw[idx] for idx in target_state if idx < len(fw._raw)}
+        step_ref = [0]
         def _step():
             t      = min(1.0, step_ref[0] / steps)
             t_ease = t * t * (3 - 2 * t)
-            fw.set_master_value(int(start_val + (target_val - start_val) * t_ease))
+            for idx, target_val in target_state.items():
+                if idx >= len(fw._raw): continue
+                start_val = start_state.get(idx, 0)
+                val = int(start_val + (target_val - start_val) * t_ease)
+                fw._raw[idx] = val
+                fdr = fw._ch_faders.get(idx)
+                if fdr is not None: fdr.set(val)
+                if idx == fw._master_idx:
+                    if fw._master_fader: fw._master_fader.set(val)
+                    if fw._master_val:   fw._master_val.config(text=fw._fmt(idx))
+                if idx in fw._ch_vallabels:
+                    fw._ch_vallabels[idx].config(text=fw._fmt(idx))
+            if fw._swatch: fw._update_swatch()
+            fw._push()
             step_ref[0] += 1
             if step_ref[0] <= steps:
                 root.after(interval_ms, _step)
@@ -4234,26 +4341,33 @@ def build_ui(patch: list, patch_path: Path = None):
         if fw in group_selected:
             fw.set_group_highlight(False)
             fw.on_master_moved = None
+            fw.on_any_moved    = None
             group_selected.remove(fw)
         else:
             if group_selected and fw.fixture_type_key() != group_selected[0].fixture_type_key():
                 return  # different type — ignore
             fw.set_group_highlight(True)
             if group_selected and group_selected[0]._master_idx is not None:
-                # Fade to match — don't add to group until fade completes
-                # so set_master_value during fade doesn't trigger group sync
-                target = group_selected[0]._raw[group_selected[0]._master_idx]
+                # Fade to match first fixture's full state
+                source = group_selected[0]
+                target_state = {idx: source._raw[idx] for idx in range(len(source._raw))}
                 def _on_fade_done(fixture=fw):
                     group_selected.append(fixture)
                     fixture.on_master_moved = _on_group_master_moved
-                _fade_fixture_to(fw, target, on_done=_on_fade_done)
+                    fixture.on_any_moved    = _on_group_any_moved
+                    for gfw in group_selected:
+                        _programmer_update(gfw)
+                _fade_fixture_to_state(fw, target_state, on_done=_on_fade_done)
             else:
                 # First fixture or no master — just add immediately
                 group_selected.append(fw)
                 fw.on_master_moved = _on_group_master_moved
+                fw.on_any_moved    = _on_group_any_moved
+                # All current group members enter programmer
+                for gfw in group_selected:
+                    _programmer_update(gfw)
 
     def _cancel_paste(update_btn=True):
-        if not paste_mode[0]: return
         paste_mode[0] = False
         for fw in all_widgets:
             if isinstance(fw, CustomFixture):
@@ -4276,6 +4390,7 @@ def build_ui(patch: list, patch_path: Path = None):
         if fw.fixture_type_key() != _clipboard["type_key"]: return
         fw.set_state(_clipboard["state"])
         fw.set_paste_highlight(False)
+        _programmer_update(fw)
 
     def _on_fixture_click(fw):
         last_clicked[0] = fw
@@ -4340,6 +4455,60 @@ def build_ui(patch: list, patch_path: Path = None):
         divider_entries = [fi for fi in new_patch if fi.get("type","").lower() == "divider"]
         print(f"Patch reloaded: {len(new_patch)} entries, {len(regular_defs)} fixtures")
         rebuild_fixtures(zoom_level[0])
+
+    def _programmer_clear():
+        """Clear programmer and base state, remove highlights."""
+        _programmer.clear()
+        _programmer_base.clear()
+        for fw in all_widgets:
+            _programmer_highlight(fw, False)
+            # Also clear member widgets inside groups
+            if isinstance(fw, GroupWidget):
+                for mw in fw._member_widgets:
+                    _programmer_highlight(mw, False)
+
+    def _programmer_snapshot():
+        """Snapshot current fixture states as the recall base."""
+        _programmer_base.clear()
+        for fw in all_widgets:
+            if isinstance(fw, (CustomFixture, DigitalFixture)):
+                _programmer_base[fw.name] = dict(fw.get_state())
+
+    def _programmer_highlight(fw, active: bool):
+        """Tint fixture border to show it's in the programmer."""
+        try:
+            if active:
+                fw.configure(highlightbackground="#44aaff",
+                             highlightthickness=2)
+            else:
+                orig = getattr(fw, "_orig_highlight", None)
+                if orig is None:
+                    # Fallback — use widget bg or default dark
+                    orig = getattr(fw, "_bg", None) or "#2b2b2b"
+                fw.configure(highlightbackground=orig,
+                             highlightthickness=2)
+        except Exception:
+            pass
+
+    def _programmer_touch(fw):
+        """Mark fixture as touched — add to programmer."""
+        if fw.name in _programmer:
+            return  # already marked
+        _programmer[fw.name] = {}
+        _programmer_highlight(fw, True)
+
+    def _programmer_update(fw):
+        """Mark fixture as in programmer, storing only channels that changed from base."""
+        base = _programmer_base.get(fw.name, {})
+        current = fw.get_state()
+        # Find channels that differ from base
+        changed = {k: v for k, v in current.items()
+                   if k not in base or base[k] != v}
+        if not changed:
+            return  # nothing actually changed yet
+        if fw.name not in _programmer:
+            _programmer_touch(fw)
+        _programmer[fw.name] = changed
 
     def rebuild_fixtures(zoom: float):
         states      = [fw.get_state() for fw in all_widgets]
@@ -4475,6 +4644,36 @@ def build_ui(patch: list, patch_path: Path = None):
                 # Also add member widgets to all_widgets for scene/OSC access
                 all_widgets.extend(w._member_widgets)
                 all_widgets.append(w)
+                # Programmer: bind mouse events on group master and member faders
+                def _bind_group_prog(grp=w):
+                    def _touch_grp(e, grp=grp):
+                        _programmer_update(grp)
+                    def _touch_member(e, fw=None):
+                        _programmer_update(fw)
+                    # Group master faders
+                    mf = grp._master_fixture
+                    if mf:
+                        faders = []
+                        if hasattr(mf, "_master_fader") and mf._master_fader:
+                            faders.append(mf._master_fader)
+                        for fdr in getattr(mf, "_ch_faders", {}).values():
+                            faders.append(fdr)
+                        for fdr in faders:
+                            fdr.bind("<ButtonPress-1>", _touch_grp, add="+")
+                            fdr.bind("<B1-Motion>",     _touch_grp, add="+")
+                    # Member faders
+                    for mw in grp._member_widgets:
+                        def _mk_touch(fw=mw):
+                            def _t(e, fw=fw): _programmer_update(fw)
+                            return _t
+                        _t = _mk_touch()
+                        if hasattr(mw, "_master_fader") and mw._master_fader:
+                            mw._master_fader.bind("<ButtonPress-1>", _t, add="+")
+                            mw._master_fader.bind("<B1-Motion>",     _t, add="+")
+                        for fdr in getattr(mw, "_ch_faders", {}).values():
+                            fdr.bind("<ButtonPress-1>", _t, add="+")
+                            fdr.bind("<B1-Motion>",     _t, add="+")
+                _bind_group_prog()
 
             elif ftype not in ("submaster", "sequence"):
                 try:
@@ -4488,11 +4687,36 @@ def build_ui(patch: list, patch_path: Path = None):
                                        defn["channels"], sz=sz, colour=colour,
                                        layout=defn.get("layout", "auto"))
                 else:
+                    _channels = defn["channels"]
+                    if defn.get("lockable"):
+                        _channels = [dict(c, **{"__lockable__": True}) for c in _channels]
                     w = CustomFixture(parent, f2["name"], f2["address"],
-                                      defn["channels"], sz=sz, colour=colour)
+                                      _channels, sz=sz, colour=colour)
                 w.pack(side=tk.LEFT, padx=2, pady=2, anchor="n")
                 w.bind("<Button-1>",  lambda e, fw=w: _on_fixture_click(fw))
                 w.bind("<Shift-Button-1>", lambda e, fw=w: _on_shift_click(fw))
+                # Programmer: mark fixture on any fader mouse interaction
+                def _bind_fader_prog(fw=w):
+                    # Store original highlight before any programmer activity
+                    try:
+                        fw._orig_highlight = fw.cget("highlightbackground")
+                    except Exception:
+                        fw._orig_highlight = fw._bg if hasattr(fw, "_bg") else "#2b2b2b"
+                    def _touch(e, fw=fw):
+                        _programmer_update(fw)
+                    faders = []
+                    if hasattr(fw, "_master_fader") and fw._master_fader:
+                        faders.append(fw._master_fader)
+                    for fdr in getattr(fw, "_ch_faders", {}).values():
+                        faders.append(fdr)
+                    for fdr in faders:
+                        fdr.bind("<ButtonPress-1>",  _touch, add="+")
+                        fdr.bind("<B1-Motion>",      _touch, add="+")
+                    # Also bind XY pad if present
+                    if getattr(fw, "_has_xy", False) and hasattr(fw, "_xy_canvas"):
+                        fw._xy_canvas.bind("<ButtonPress-1>",  _touch, add="+")
+                        fw._xy_canvas.bind("<B1-Motion>",      _touch, add="+")
+                _bind_fader_prog()
                 w.bind("<Button-2>",  lambda e, fw=w: _do_copy(fw))
                 w.bind("<Button-3>",  lambda e, fw=w: _do_copy(fw))
                 w.bind("<Control-1>", lambda e, fw=w: _do_copy(fw))
@@ -4550,8 +4774,8 @@ def build_ui(patch: list, patch_path: Path = None):
     fixture_frame.bind("<Configure>",
                        lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     rebuild_fixtures(zoom_level[0])
-
-    # ── Scene bar ──
+    # Programmer starts empty — clear highlights and snapshot base state
+    root.after(200, lambda: (_programmer_clear(), _programmer_snapshot()))
     scene_names   = {slot: scene["name"]   for slot, scene in scenes.items() if "name"   in scene}
     scene_colours = {slot: scene["colour"] for slot, scene in scenes.items() if "colour" in scene}
     scene_bar = tk.Frame(root, bg="#111111", pady=2)
@@ -5183,6 +5407,84 @@ def build_ui(patch: list, patch_path: Path = None):
             _add_row(step)
         _renumber()
 
+    def _edit_scene_fixtures(slot):
+        """Dialog to view and remove fixtures stored in a scene."""
+        if slot not in scenes: return
+        win = tk.Toplevel(root)
+        win.title(f"Scene {slot} — Edit Fixtures")
+        win.configure(bg="#1a1a1a")
+        win.resizable(True, True)
+        win.minsize(380, 300)
+        win.geometry("420x460")
+        win.grab_set()
+        win.protocol("WM_DELETE_WINDOW", lambda: (win.grab_release(), win.destroy()))
+
+        BG  = "#1a1a1a"
+        BG2 = "#222222"
+        FG  = "#cccccc"
+        FGA = "#888888"
+
+        win.columnconfigure(0, weight=1)
+        win.rowconfigure(1, weight=1)
+
+        sname = scenes[slot].get("name", f"Scene {slot}")
+        tk.Label(win, text=f"Fixtures in Scene {slot}  —  {sname}",
+                 bg=BG, fg="#ffcc00",
+                 font=("Helvetica", 11, "bold")).grid(
+                 row=0, column=0, sticky="w", padx=12, pady=(10,4))
+
+        list_frame = tk.Frame(win, bg=BG2)
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0,4))
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+
+        canvas = tk.Canvas(list_frame, bg=BG2, highlightthickness=0)
+        scroll = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scroll.set)
+        scroll.grid(row=0, column=1, sticky="ns")
+        canvas.grid(row=0, column=0, sticky="nsew")
+
+        inner_f = tk.Frame(canvas, bg=BG2)
+        cwin = canvas.create_window((0,0), window=inner_f, anchor="nw")
+        inner_f.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(cwin, width=e.width))
+
+        def _refresh_list():
+            for w in inner_f.winfo_children():
+                w.destroy()
+            fixture_states = scenes[slot].get("fixtures", {})
+            if not fixture_states:
+                tk.Label(inner_f, text="  (empty scene)", bg=BG2, fg=FGA,
+                         font=("Helvetica", 9)).pack(fill=tk.X, pady=4)
+                return
+            for fname in sorted(fixture_states.keys()):
+                row = tk.Frame(inner_f, bg=BG2)
+                row.pack(fill=tk.X, pady=1)
+                tk.Label(row, text=fname, bg=BG2, fg=FG,
+                         font=("Helvetica", 9), anchor="w",
+                         width=24).pack(side=tk.LEFT, padx=8)
+                ch_count = len(fixture_states[fname])
+                tk.Label(row, text=f"{ch_count} ch",
+                         bg=BG2, fg=FGA,
+                         font=("Helvetica", 8)).pack(side=tk.LEFT)
+                def _remove(name=fname):
+                    if name in scenes[slot]["fixtures"]:
+                        del scenes[slot]["fixtures"][name]
+                        save_scenes_to_disk()
+                        _refresh_list()
+                        _refresh_buttons()
+                btn(row, "✕", bg="#332222", fg="#ff8888",
+                    font=("Helvetica", 8), padx=4, pady=1,
+                    command=_remove).pack(side=tk.RIGHT, padx=4)
+
+        _refresh_list()
+
+        btn_row = tk.Frame(win, bg=BG)
+        btn_row.grid(row=2, column=0, pady=(4,12))
+        btn(btn_row, "Close", bg="#333333", fg="#888888",
+            font=("Helvetica", 9), padx=8, pady=5,
+            command=lambda: (win.grab_release(), win.destroy())).pack()
+
     def _rename_slot(slot):
         if _scene_fade_active[0]: return
         win = tk.Toplevel(root)
@@ -5261,19 +5563,6 @@ def build_ui(patch: list, patch_path: Path = None):
 
     def _do_rec():
         slot = selected_slot.get()
-        if any_soloed(all_widgets):
-            from tkinter import messagebox as _mb
-            answer = _mb.askyesnocancel(
-                "Solos Active",
-                "Some channels are soloed — only soloed channels will be recorded.\n\n"
-                "• Yes  — clear solos and record all channels\n"
-                "• No   — record with solos (partial scene)\n"
-                "• Cancel — do not record",
-                parent=root)
-            if answer is None:   # Cancel
-                return
-            if answer:           # Yes — clear solos first
-                _do_clear_solos()
         store_scene(slot, all_widgets, get_fade_time())
         if slot in scene_names: scenes[slot]["name"] = scene_names[slot]
         if slot in scene_colours: scenes[slot]["colour"] = scene_colours[slot]
@@ -5400,6 +5689,7 @@ def build_ui(patch: list, patch_path: Path = None):
         _context_panel[0] = None
         _context_slot[0]  = None
         _refresh_buttons()
+        root.focus_set()  # return focus so Escape/keyboard bindings work
 
     def _scene_context(slot, x, y):
         """Comprehensive right-click panel for scene operations."""
@@ -5416,6 +5706,8 @@ def build_ui(patch: list, patch_path: Path = None):
 
         _bp_id = root.bind("<ButtonPress>", lambda e: _close_context(), add="+")
         panel._bp_id = _bp_id
+        panel.bind("<Escape>", lambda e: (_close_context(), _cancel_paste(), _clear_group()))
+        panel.focus_set()
 
         slot_name   = scene_names.get(slot, f"Scene {slot}")
         has_scene   = slot in scenes
@@ -5507,21 +5799,15 @@ def build_ui(patch: list, patch_path: Path = None):
             fade_var.set(str(fv))
             _apply_name_colour()
             _close_context()
-            if any_soloed(all_widgets):
-                from tkinter import messagebox as _mb
-                answer = _mb.askyesnocancel(
-                    "Solos Active",
-                    "Some channels are soloed.\n\n"
-                    "Yes = clear solos and record all\n"
-                    "No = record with solos (partial)\n"
-                    "Cancel = do not record",
-                    parent=root)
-                if answer is None: return
-                if answer: _do_clear_solos()
+
             store_scene(slot, all_widgets, fv)
             if slot in scene_names: scenes[slot]["name"] = scene_names[slot]
             if slot in scene_colours: scenes[slot]["colour"] = scene_colours[slot]
             save_scenes_to_disk()
+            _programmer_clear()
+            _programmer_snapshot()
+            _clear_group()
+            _cancel_paste()
             _refresh_buttons()
 
         def _do_panel_clr():
@@ -5538,6 +5824,18 @@ def build_ui(patch: list, patch_path: Path = None):
         def _do_panel_save():
             _apply_name_colour()
             _close_context()
+
+        def _do_set_fade():
+            """Update stored fade time without re-recording fixtures."""
+            try:    fv = max(0.0, float(panel_fade_var.get()))
+            except: fv = 0.0
+            fade_var.set(str(fv))
+            _apply_name_colour()
+            _close_context()
+            if slot in scenes:
+                scenes[slot]["fade"] = fv
+                save_scenes_to_disk()
+                print(f"Scene {slot} fade time updated to {fv}s.")
 
         def _do_edit_sequence():
             _close_context()
@@ -5571,6 +5869,9 @@ def build_ui(patch: list, patch_path: Path = None):
             btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "⏱  Set fade time", "#222233", "#aaaaff",
+                font=("Helvetica", 9), pady=3,
+                command=_do_set_fade).pack(fill=tk.X, pady=(0,2))
             def _do_snapshot_to_scene(slot=slot):
                 """Save end-state of sequence as a regular scene."""
                 if slot not in scenes: return
@@ -5680,12 +5981,69 @@ def build_ui(patch: list, patch_path: Path = None):
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_clr).pack(fill=tk.X, pady=(0,2))
         else:
-            btn(inner, "⏺  Record",  "#aa3300", "#ffffff",
+            def _do_panel_rec_changes():
+                """Record only programmer (touched) fixtures."""
+                _apply_name_colour()
+                _close_context()
+                if not _programmer:
+                    store_scene(slot, all_widgets, get_fade_time())
+                else:
+                    existing = dict(scenes.get(slot, {}).get("fixtures", {}))
+                    existing.update({k: dict(v) for k, v in _programmer.items()})
+                    fade = get_fade_time()
+                    scenes[slot] = {"fade": fade, "fixtures": existing}
+                    if slot in scene_names: scenes[slot]["name"] = scene_names[slot]
+                    if slot in scene_colours: scenes[slot]["colour"] = scene_colours[slot]
+                    save_scenes_to_disk()
+                    print(f"Scene {slot} stored (changes: {list(_programmer.keys())}).")
+                _programmer_clear()
+                _programmer_snapshot()
+                _clear_group()
+                _cancel_paste()
+                _refresh_buttons()
+
+            def _do_panel_update():
+                """Update only fixtures already in the scene with programmer values."""
+                if slot not in scenes: return
+                _apply_name_colour()
+                _close_context()
+                existing = scenes[slot].get("fixtures", {})
+                updates = {k: v for k, v in _programmer.items() if k in existing}
+                if updates:
+                    existing.update(updates)
+                    save_scenes_to_disk()
+                    print(f"Scene {slot} updated ({list(updates.keys())}).")
+                _programmer_clear()
+                _programmer_snapshot()
+                _clear_group()
+                _cancel_paste()
+                _refresh_buttons()
+
+            # Programmer status indicator
+            prog_count = len(_programmer)
+            prog_count_ch = sum(len(v) for v in _programmer.values())
+            prog_label = f"  {prog_count} fixture{'s' if prog_count != 1 else ''} ({prog_count_ch} ch) changed" if prog_count else "  No changes"
+            tk.Label(inner, text=prog_label, bg="#222222",
+                     fg="#44aaff" if prog_count else "#555555",
+                     font=("Helvetica", 8)).pack(fill=tk.X, pady=(0,4))
+
+            btn(inner, "⏺  Record All",  "#aa3300", "#ffffff",
                 font=("Helvetica", 10, "bold"), pady=4,
                 command=_do_panel_rec).pack(fill=tk.X, pady=(0,2))
+            if prog_count:
+                btn(inner, f"⏺  Record Changes ({prog_count_ch} ch)", "#884400", "#ffcc88",
+                    font=("Helvetica", 9, "bold"), pady=3,
+                    command=_do_panel_rec_changes).pack(fill=tk.X, pady=(0,2))
+                if has_scene:
+                    btn(inner, "↑  Update scene", "#224422", "#88ffaa",
+                        font=("Helvetica", 9), pady=3,
+                        command=_do_panel_update).pack(fill=tk.X, pady=(0,2))
             btn(inner, "💾  Save name / colour", "#223333", "#88ffcc",
                 font=("Helvetica", 9), pady=3,
                 command=_do_panel_save).pack(fill=tk.X, pady=(0,2))
+            btn(inner, "⏱  Set fade time", "#222233", "#aaaaff",
+                font=("Helvetica", 9), pady=3,
+                command=_do_set_fade).pack(fill=tk.X, pady=(0,2))
             def _do_convert_to_seq(slot=slot):
                 _close_context()
                 # Pre-populate sequence steps from scene channel values
@@ -5731,6 +6089,9 @@ def build_ui(patch: list, patch_path: Path = None):
                 font=("Helvetica", 9), pady=3,
                 command=_do_convert_to_seq).pack(fill=tk.X, pady=(0,2))
             if has_scene:
+                btn(inner, "✎  Edit fixtures in scene", "#222233", "#88aaff",
+                    font=("Helvetica", 9), pady=3,
+                    command=lambda: (_close_context(), _edit_scene_fixtures(slot))).pack(fill=tk.X, pady=(0,2))
                 btn(inner, "✕  Clear scene", "#442222", "#ff8888",
                     font=("Helvetica", 9), pady=3,
                     command=_do_panel_clr).pack(fill=tk.X, pady=(0,2))
@@ -5796,6 +6157,13 @@ def build_ui(patch: list, patch_path: Path = None):
         stop_fade_btn._active_fg = "#555555"
 
     _last_recalled    = {"slot": None, "snapshot": {}}
+
+    # ── Programmer ────────────────────────────────────────────────────────────
+    # Tracks fixtures touched since last scene recall
+    _programmer       = {}   # {fw_name: {ch_idx: value}} — current programmer contents
+    _programmer_base  = {}   # {fw_name: {ch_idx: value}} — values at last recall
+
+
     _seq_running      = [False]
     _seq_after_id     = [None]
     _seq_stop_flag    = [False]
@@ -6046,9 +6414,11 @@ def build_ui(patch: list, patch_path: Path = None):
             if not _scene_fade_stop[0]:
                 _set_scene_buttons_state(tk.NORMAL)
             _last_recalled["slot"] = slot
+            _programmer_clear()
+            root.after(50, _programmer_snapshot)  # slight delay to let state settle
         recall_scene(slot, all_widgets, root, on_complete=_on_done, stop_flag=_scene_fade_stop)
 
-    def _do_clear_solos():
+    def _do_clear_locks():
         """Clear solos only — locks are preserved."""
         for fw in all_widgets:
             if isinstance(fw, DigitalFixture):
@@ -6093,10 +6463,19 @@ def build_ui(patch: list, patch_path: Path = None):
         command=lambda: _do_stop_fade())
     stop_fade_btn.pack(side=tk.LEFT, padx=(0, 10))
 
-    btn(ctrl_strip, "CLEAR SOLOS", bg="#332200", fg="#ddaa00",
+    def _do_clear_all():
+        """Clear programmer, multi-select, and paste mode."""
+        _programmer_clear()
+        _programmer_snapshot()
+        _clear_group()
+        _cancel_paste()
+        root.focus_set()
+
+    btn(ctrl_strip, "CLEAR ALL", bg="#1a2a1a", fg="#66cc66",
         font=("Helvetica", 9, "bold"), pady=6,
-        command=_do_clear_solos).pack(side=tk.LEFT, padx=(0, 3))
-    btn(ctrl_strip, "CLEAR LOCKS", bg="#330000", fg="#ff6666",
+        command=_do_clear_all).pack(side=tk.LEFT, padx=(0, 6))
+
+    btn(ctrl_strip, "UNLOCK ALL", bg="#332200", fg="#ddaa00",
         font=("Helvetica", 9, "bold"), pady=6,
         command=_do_clear_locks).pack(side=tk.LEFT, padx=(0, 6))
     btn(ctrl_strip, "💾 SAVE", bg="#223344", fg="#88bbff",

@@ -1,5 +1,4 @@
 {
-  "colour": "#1a2b8a",
   "channels": [
     {
       "label": "R",
@@ -68,69 +67,145 @@
       "show": true
     },
     {
-      "label": "ColMcro",
+      "label": "Col Macro",
       "master": false,
       "default": 0,
       "range": {
-        "0-40": "Manual",
-        "41-60": "Col chg",
-        "61-80": "Col fade",
-        "81-100": "Col in-out",
-        "101-120": "STL",
-        "121-140": "STL w. BO",
-        "141-160": "Col w. Zm",
-        "161-180": "Col w. Fd Zm",
-        "181-200": "Col i/o w. Zm",
-        "201-220": "STL w.Zm",
-        "221-255": "STL w. Bo Zm"
+        "0-3": "Off",
+        "4-7": "Red",
+        "8-11": "Green",
+        "12-15": "Blue",
+        "16-19": "White",
+        "20-23": "Amber",
+        "24-27": "UV",
+        "28-31": "R+G",
+        "32-35": "R+B",
+        "36-39": "R+W",
+        "40-43": "R+A",
+        "44-47": "R+UV",
+        "48-51": "G+B",
+        "52-55": "G+W",
+        "56-59": "G+A",
+        "60-63": "G+UV",
+        "64-67": "B+W",
+        "68-71": "B+A",
+        "72-75": "B+UV",
+        "76-79": "W+A",
+        "80-83": "W+UV",
+        "84-87": "A+UV",
+        "88-91": "R+G+W",
+        "92-95": "R+G+W",
+        "96-99": "R+G+A",
+        "100-103": "R+G+UV",
+        "104-107": "R+B+W",
+        "108-111": "R+B+A",
+        "112-115": "R+B+UV",
+        "116-119": "R+W+A",
+        "120-123": "R+W+UV",
+        "124-127": "R+A+UV",
+        "128-131": "G+B+W",
+        "132-135": "G+B+A",
+        "136-139": "G+B+UV",
+        "140-143": "G+W+A",
+        "144-147": "G+W+UV",
+        "148-151": "G+A+UV",
+        "152-155": "B+W+A",
+        "156-159": "B+W+UV",
+        "160-163": "B+W+UV",
+        "164-167": "W+A+UV",
+        "168-171": "R+G+B+W",
+        "172-175": "R+G+B+A",
+        "176-179": "R+G+B+UV",
+        "180-183": "R+G+W+A",
+        "184-187": "R+G+W+UV",
+        "188-191": "R+G+A+UV",
+        "192-195": "R+B+W+A",
+        "196-199": "R+B+W+UV",
+        "200-203": "R+B+A+UV",
+        "204-207": "R+W+A+UV",
+        "208-211": "G+B+W+A",
+        "212-215": "G+B+W+UV",
+        "216-219": "G+B+A+UV",
+        "220-223": "G+W+A+UV",
+        "224-227": "B+W+A+UV",
+        "228-231": "R+G+B+W+A",
+        "232-235": "R+G+B+W+UV",
+        "236-239": "R+G+B+A+UV",
+        "240-243": "R+G+A+W+UV",
+        "244-247": "R+B+W+A+UV",
+        "248-251": "G+B+W+A+UV",
+        "252-255": "R+G+B+W+A+UV"
       },
       "unit": "named",
-      "show": true
+      "show": true,
+      "jump": true
     },
     {
       "label": "Program",
       "master": false,
       "default": 0,
       "range": {
-        "0-40": "Manual",
-        "41-60": "Col chg",
-        "61-80": "Col fade",
-        "81-100": "Col in-out",
-        "101-120": "STL",
-        "121-140": "STL w. BO",
-        "141-160": "Col w. Zm",
-        "161-180": "Col w. Fd Zm",
-        "181-200": "Col i/o w. Zm",
-        "201-220": "STL w.Zm",
-        "221-255": "STL w. Bo Zm"
+        "0-15": "No funct",
+        "16-25": "Prog 1",
+        "26-35": "Prog 2",
+        "36-45": "Prog 3",
+        "46-55": "Prog 4",
+        "56-65": "Prog 5",
+        "66-75": "Prog 6",
+        "76-85": "Prog 7",
+        "86-95": "Prog 8",
+        "96-105": "Prog 9",
+        "106-115": "Prog 10",
+        "116-125": "Prog 11",
+        "126-135": "Prog 12",
+        "136-145": "Prog 13",
+        "146-155": "Prog 14",
+        "156-165": "Prog 15",
+        "166-175": "Prog 16",
+        "176-185": "Prog 17",
+        "186-195": "Prog 18",
+        "196-205": "Prog 19",
+        "206-215": "Prog 20",
+        "216-225": "Prog 21",
+        "226-235": "Prog 22",
+        "236-245": "Auto Run",
+        "246-255": "STL"
       },
       "unit": "named",
-      "show": true
+      "show": true,
+      "jump": true
     },
     {
-      "label": "ProgSpeed",
+      "label": "Spd/Sens",
       "master": false,
-      "default": 0,
+      "default": 128,
       "range": [
         0,
         255
       ],
       "unit": "raw",
-      "show": false
+      "show": true
     },
     {
       "label": "Strobe",
       "master": false,
-      "default": 255,
-      "range": [
-        0,
-        255
-      ],
-      "unit": "raw",
-      "show": true
+      "default": 32,
+      "range": {
+        "0-31": "LED Off",
+        "32-63": "LED On",
+        "64-95": "Strobe Spd",
+        "96-127": "LED On",
+        "128-159": "Pulse Spd",
+        "160-191": "LED On",
+        "192-223": "Random Spd",
+        "224-255": "LED On"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
     },
     {
-      "label": "Intensity",
+      "label": "Master",
       "master": true,
       "default": 0,
       "range": [
@@ -141,15 +216,20 @@
       "show": true
     },
     {
-      "label": "Crv",
+      "label": "Curves",
       "master": false,
-      "default": 128,
-      "range": [
-        0,
-        255
-      ],
-      "unit": "raw",
-      "show": false
+      "default": 90,
+      "range": {
+        "0-20": "Standard",
+        "21-40": "Stage",
+        "41-60": "TV",
+        "61-80": "Architecture",
+        "81-100": "Theatre",
+        "101-255": "Default"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
     }
   ]
 }

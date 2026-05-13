@@ -1,0 +1,179 @@
+{
+  "channels": [
+    {
+      "label": "Pan",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true,
+      "role": "pan"
+    },
+    {
+      "label": "Tilt",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true,
+      "role": "tilt"
+    },
+    {
+      "label": "Spot Dim",
+      "master": true,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Spot Strobe",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-9": "Off",
+        "10-250": "Strobe Spd",
+        "251-255": "Open"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Focus",
+      "master": false,
+      "default": 128,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Wash Dim",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Wash Strobe",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-9": "Off",
+        "10-250": "Strobe Spd",
+        "251-255": "Open"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Colour Temp",
+      "master": false,
+      "default": 0,
+      "range": [
+        0,
+        255
+      ],
+      "unit": "raw",
+      "show": true
+    },
+    {
+      "label": "Col Macro",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-10": "Off",
+        "11-20": "Red",
+        "21-30": "Green",
+        "31-40": "Blue",
+        "41-50": "White",
+        "51-60": "R+W",
+        "61-70": "G+W",
+        "71-80": "B+W",
+        "81-90": "R+G",
+        "91-100": "G+B",
+        "101-110": "R+B",
+        "111-120": "R+G+W",
+        "121-130": "G+B+W",
+        "131-140": "R+B+W",
+        "141-150": "RGBW",
+        "151-200": "Col Step",
+        "201-255": "Col Fade"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Auto",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-24": "Off",
+        "25-50": "Auto 1",
+        "51-75": "Auto 2",
+        "76-100": "Auto 3",
+        "101-125": "Auto 4",
+        "126-150": "Auto 5",
+        "151-175": "Auto 6",
+        "176-200": "Auto 7",
+        "201-255": "Sound"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Program",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-10": "Off",
+        "11-20": "Prog 1",
+        "21-30": "Prog 2",
+        "31-40": "Prog 3",
+        "41-50": "Prog 4",
+        "51-60": "Prog 5",
+        "61-70": "Prog 6",
+        "71-80": "Prog 7",
+        "81-90": "Prog 8",
+        "91-230": "Sound",
+        "230-240": "Reset",
+        "241-255": "Off"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    },
+    {
+      "label": "Reset",
+      "master": false,
+      "default": 0,
+      "range": {
+        "0-229": "Off",
+        "230-240": "Reset",
+        "241-255": "Off"
+      },
+      "unit": "named",
+      "show": true,
+      "jump": true
+    }
+  ]
+}
