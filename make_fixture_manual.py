@@ -319,15 +319,21 @@ story += [
     sp(2),
     value_table([
         ('"role": "pan"',
-         'Marks this channel as the Pan (horizontal movement) channel. '
-         'When both pan and tilt roles are present in the same fixture, '
-         'an XY joystick pad appears on the faceplate. '
-         'Dragging the pad sets both pan and tilt simultaneously. '
-         'The fader is still shown for fine control.'),
+         'Pan channel for a single-head fixture. When both pan and tilt roles are present, '
+         'an XY joystick pad appears. Dragging sets both simultaneously. '
+         'The fader remains visible for fine control.'),
         ('"role": "tilt"',
-         'Marks this channel as the Tilt (vertical movement) channel. '
-         'Works in conjunction with the pan role to enable the XY pad. '
-         'Default value 128 (centre) is recommended for both pan and tilt.'),
+         'Tilt channel for a single-head fixture. Works with pan role to enable the XY pad. '
+         'Default value 128 (centre) recommended.'),
+        ('"role": "pan1" / "pan2"...',
+         'Numbered pan role for multi-head fixtures (scanner bars etc). '
+         'When numbered pairs are found (pan1/tilt1, pan2/tilt2 etc), a single XY pad '
+         'appears with a Head dropdown selector. Selecting a head switches the pad to '
+         'control that head. All heads faders remain independently accessible.'),
+        ('"role": "tilt1" / "tilt2"...',
+         'Numbered tilt role matching the corresponding numbered pan. '
+         'The desk detects all complete pairs automatically. '
+         'A 4-head bar would use pan1/tilt1 through pan4/tilt4.'),
     ]),
     sp(2),
     note("The XY pad appears in the same row as colour faders (R/G/B/W etc) "
@@ -438,7 +444,25 @@ story += [
          '}'),
     sp(4),
 
-    h2("8.5 Lockable House Lights"),
+    h2("8.5 Multi-Head Scanner Bar (numbered roles)"),
+    code('{\n'
+         '  "channels": [\n'
+         '    {"label": "Blackout", "master": true,  "default": 0,\n'
+         '     "range": {"0-127":"Blackout","128-255":"Full On"},\n'
+         '     "unit": "named", "show": true, "jump": true},\n'
+         '    {"label": "1 Pan",   "master": false, "default": 128,\n'
+         '     "range": [0, 255], "unit": "raw", "show": true, "role": "pan1"},\n'
+         '    {"label": "1 Tilt",  "master": false, "default": 128,\n'
+         '     "range": [0, 255], "unit": "raw", "show": true, "role": "tilt1"},\n'
+         '    {"label": "2 Pan",   "master": false, "default": 128,\n'
+         '     "range": [0, 255], "unit": "raw", "show": true, "role": "pan2"},\n'
+         '    {"label": "2 Tilt",  "master": false, "default": 128,\n'
+         '     "range": [0, 255], "unit": "raw", "show": true, "role": "tilt2"}\n'
+         '  ]\n'
+         '}'),
+    sp(4),
+
+    h2("8.6 Lockable House Lights"),
     code('{\n'
          '  "channels": [\n'
          '    {"label": "Dimmer", "master": true, "default": 0,\n'

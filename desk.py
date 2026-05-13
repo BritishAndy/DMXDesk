@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 224
+BUILD   = 225
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -378,10 +378,23 @@ class CustomFixture(tk.Frame):
         self._lockable = any(ch.get("__lockable__") for ch in channel_defs)
         # Jump channels — snap to end value instantly during fades
         self._jump_indices = {i for i, ch in enumerate(channel_defs) if ch.get("jump")}
-        # Pan/tilt roles for XY pad
+        # Pan/tilt roles for XY pad — single head (role: pan/tilt)
+        # or multi-head (role: pan1/tilt1, pan2/tilt2 etc)
         self._pan_idx  = next((i for i, ch in enumerate(channel_defs) if ch.get("role") == "pan"),  None)
         self._tilt_idx = next((i for i, ch in enumerate(channel_defs) if ch.get("role") == "tilt"), None)
+        # Collect numbered pairs: {1: (pan_idx, tilt_idx), 2: ...}
+        _pan_nums  = {int(ch["role"][3:]): i for i, ch in enumerate(channel_defs)
+                      if ch.get("role","").startswith("pan") and ch["role"][3:].isdigit()}
+        _tilt_nums = {int(ch["role"][4:]): i for i, ch in enumerate(channel_defs)
+                      if ch.get("role","").startswith("tilt") and ch["role"][4:].isdigit()}
+        self._xy_pairs = {n: (_pan_nums[n], _tilt_nums[n])
+                          for n in _pan_nums if n in _tilt_nums}
+        # Multi-head: use first pair as default
+        if self._xy_pairs and self._pan_idx is None:
+            first = min(self._xy_pairs)
+            self._pan_idx, self._tilt_idx = self._xy_pairs[first]
         self._has_xy   = self._pan_idx is not None and self._tilt_idx is not None
+        self._xy_head  = 1 if self._xy_pairs else 0  # currently selected head (1-based)
 
         # ── Header: name + (if not compact) fixture-level solo ──
         header = tk.Frame(self, bg=bg)
@@ -667,6 +680,25 @@ class CustomFixture(tk.Frame):
                    padx=(0, 4) if parent else 0,
                    pady=(4, 0) if not parent else 0,
                    anchor="n")
+
+        # Head selector dropdown for multi-head fixtures
+        if self._xy_pairs:
+            head_row = tk.Frame(outer, bg=bg)
+            head_row.pack(fill=tk.X)
+            tk.Label(head_row, text="Head:", bg=bg, fg="#888888",
+                     font=("Helvetica", max(6, sz["ch_font"]))).pack(side=tk.LEFT, padx=(2,1))
+            self._xy_head_var = tk.StringVar(value="1")
+            head_opts = [str(n) for n in sorted(self._xy_pairs)]
+            head_cb = ttk.Combobox(head_row, textvariable=self._xy_head_var,
+                                   values=head_opts, state="readonly",
+                                   width=3, font=("Helvetica", max(6, sz["ch_font"])))
+            head_cb.pack(side=tk.LEFT)
+            def _on_head_change(*_):
+                n = int(self._xy_head_var.get())
+                self._pan_idx, self._tilt_idx = self._xy_pairs[n]
+                self._xy_head = n
+                self._update_xy_pad()
+            head_cb.bind("<<ComboboxSelected>>", _on_head_change)
 
         # Labels
         lbl_row = tk.Frame(outer, bg=bg)
