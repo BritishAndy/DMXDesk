@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 228
+BUILD   = 229
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -3034,7 +3034,8 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
     COL_WIDTHS = [c[2] for c in COLS]
 
     # ── Layout: right column for all buttons, left for table ──
-    win.geometry("780x520")
+    win.geometry("780x580")
+    win.minsize(700, 480)
 
     # Right column — all buttons
     side = tk.Frame(win, bg=BG2, padx=8, pady=8)
@@ -3770,7 +3771,7 @@ def open_patch_editor(parent, patch_path: Path, fixtures_dir: Path, on_save_call
 
 
     btn(side, "Cancel", bg="#333333", fg=FGA, font=fnt_s,
-        pady=4, width=14, command=win.destroy).pack(fill=tk.X, pady=(2,0))
+        pady=4, width=14, command=win.destroy).pack(side=tk.BOTTOM, fill=tk.X, pady=(2,0))
 
     _refresh_table()
 
@@ -3794,8 +3795,9 @@ def open_settings_dialog(parent, zoom_level: list, on_layout_change=None):
     win = tk.Toplevel(parent)
     win.title("Settings")
     win.configure(bg="#1a1a1a")
-    win.resizable(False, False)
-    win.geometry("560x560")
+    win.resizable(True, True)
+    win.geometry("560x620")
+    win.minsize(520, 560)
     win.grab_set()
 
     BG   = "#1a1a1a"
@@ -3966,17 +3968,18 @@ def open_settings_dialog(parent, zoom_level: list, on_layout_change=None):
         zoom_var.set(str(_snap["startup_zoom"]))
         status_lbl.config(text="Reverted to previous values.", fg="#ffaa44")
 
-    status_lbl = tk.Label(win, text="", bg=BG, fg=FGA, font=fnt_s, anchor="w")
-    status_lbl.pack(fill=tk.X, padx=12, pady=(4,0))
-
+    # Button row packed to BOTTOM first — always visible even if content is tall
     btns = tk.Frame(win, bg=BG)
-    btns.pack(fill=tk.X, padx=10, pady=(4,16))
+    btns.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=(4,16))
     btn(btns, "Apply",  bg="#225522", fg=GOLD, font=fnt, pady=6,
         command=_apply).pack(side=tk.RIGHT, padx=(4,0))
     btn(btns, "Revert", bg="#332211", fg="#ffaa44", font=fnt, pady=6,
         command=_revert).pack(side=tk.RIGHT, padx=(4,0))
     btn(btns, "Close",  bg="#333333", fg=FGA, font=fnt, pady=6,
         command=win.destroy).pack(side=tk.RIGHT)
+
+    status_lbl = tk.Label(win, text="", bg=BG, fg=FGA, font=fnt_s, anchor="w")
+    status_lbl.pack(side=tk.BOTTOM, fill=tk.X, padx=12, pady=(4,0))
 
 
 # ── OSC Listener ───────────────────────────────────────────────────────────────
