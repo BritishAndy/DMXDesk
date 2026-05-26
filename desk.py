@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 225
+BUILD   = 226
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -681,24 +681,31 @@ class CustomFixture(tk.Frame):
                    pady=(4, 0) if not parent else 0,
                    anchor="n")
 
-        # Head selector dropdown for multi-head fixtures
+        # Head selector radio buttons for multi-head fixtures
         if self._xy_pairs:
             head_row = tk.Frame(outer, bg=bg)
-            head_row.pack(fill=tk.X)
-            tk.Label(head_row, text="Head:", bg=bg, fg="#888888",
-                     font=("Helvetica", max(6, sz["ch_font"]))).pack(side=tk.LEFT, padx=(2,1))
-            self._xy_head_var = tk.StringVar(value="1")
-            head_opts = [str(n) for n in sorted(self._xy_pairs)]
-            head_cb = ttk.Combobox(head_row, textvariable=self._xy_head_var,
-                                   values=head_opts, state="readonly",
-                                   width=3, font=("Helvetica", max(6, sz["ch_font"])))
-            head_cb.pack(side=tk.LEFT)
-            def _on_head_change(*_):
-                n = int(self._xy_head_var.get())
+            head_row.pack(fill=tk.X, pady=(0, 2))
+            self._xy_head_var = tk.IntVar(value=1)
+
+            def _on_head_change(n):
                 self._pan_idx, self._tilt_idx = self._xy_pairs[n]
                 self._xy_head = n
                 self._update_xy_pad()
-            head_cb.bind("<<ComboboxSelected>>", _on_head_change)
+
+            for n in sorted(self._xy_pairs):
+                rb = tk.Radiobutton(head_row,
+                                    text=str(n),
+                                    variable=self._xy_head_var,
+                                    value=n,
+                                    command=lambda n=n: _on_head_change(n),
+                                    bg=bg, fg="#aaaaaa",
+                                    selectcolor="#333366",
+                                    activebackground=bg,
+                                    font=("Helvetica", max(6, sz["ch_font"])),
+                                    indicatoron=False,
+                                    padx=4, pady=1,
+                                    relief=tk.RAISED, bd=1)
+                rb.pack(side=tk.LEFT, padx=1)
 
         # Labels
         lbl_row = tk.Frame(outer, bg=bg)
