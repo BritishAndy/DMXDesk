@@ -35,7 +35,7 @@ import threading
 import struct
 
 VERSION = "1.0"
-BUILD   = 226
+BUILD   = 228
 import socket as _socket
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -4155,6 +4155,7 @@ def build_ui(patch: list, patch_path: Path = None):
 
     # Apply saved settings
     global _artnet_ip, _artnet_port, _artnet_universe, _dmx_interval_ms, _fade_steps_sec
+    global _scene_layout, _reload_last_show, _osc_enabled, _osc_port
     if "artnet_ip"       in _prefs and _artnet_ip:
         _artnet_ip       = _prefs["artnet_ip"]
         if _artnet_sock: start_artnet(_artnet_ip, _prefs.get("artnet_port", 6454),
@@ -4850,7 +4851,9 @@ def build_ui(patch: list, patch_path: Path = None):
         """Re-grid all scene buttons using current _scene_layout."""
         for slot, b in go_buttons.items():
             grid_row, grid_col = _slot_pos(slot)
-            b.grid(row=grid_row, column=grid_col, sticky="ew", padx=2, pady=2)
+            # Re-grid the container frame, not the button (button is packed inside container)
+            container = getattr(b, "_container", b)
+            container.grid(row=grid_row, column=grid_col, sticky="ew", padx=2, pady=2)
         # Ensure all 15 columns are weighted
         for _c in range(SCENE_COLS):
             scene_grid.columnconfigure(_c, weight=1, uniform="scene")
@@ -5885,6 +5888,12 @@ def build_ui(patch: list, patch_path: Path = None):
                 scenes[slot].pop("sequence", None)
                 save_scenes_to_disk()
                 _refresh_buttons()
+                # Force wraplength recalculation on affected button
+                b = go_buttons.get(slot)
+                if b and hasattr(b, "_container"):
+                    w = b._container.winfo_width() - 4
+                    if w > 10:
+                        b.config(wraplength=w)
             _close_context()
 
         is_seq = _is_seq(slot)
